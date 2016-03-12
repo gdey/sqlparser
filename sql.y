@@ -31,6 +31,7 @@ var (
 %union {
   empty       struct{}
   statement   Statement
+  statements  Statements
   selStmt     SelectStatement
   byt         byte
   bytes       []byte
@@ -94,6 +95,7 @@ var (
 %start any_command
 
 %type <statement> command
+%type <statements> commands
 %type <selStmt> select_statement
 %type <statement> insert_statement update_statement delete_statement set_statement
 %type <statement> create_statement alter_statement rename_statement drop_statement
@@ -147,9 +149,38 @@ var (
 %%
 
 any_command:
-  command
+  commands
   {
     SetParseTree(yylex, $1)
+  }
+
+commands:
+comment_opt command
+  {
+    comment := Comments($1)
+    if comment.IsEmpty() {
+      $$ = Statements([]Statement{$2})
+    } else {
+      $$ = Statements([]Statement{comment,$2})
+    }
+  }
+| commands ';' comment_opt command
+  {
+    comment := Comments($3)
+    if comment.IsEmpty() {
+      $$ = Statements(append($1, $4))
+    } else {
+      $$ = Statements(append($1, comment, $4))
+    }
+  }
+| commands ';' comment_opt
+  {
+    comment := Comments($3)
+    if comment.IsEmpty() {
+      $$ = $1
+    } else {
+      $$ = Statements(append($1, comment))
+    }
   }
 
 command:

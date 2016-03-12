@@ -54,15 +54,38 @@ type Statement interface {
 	SQLNode
 }
 
-func (*Union) IStatement()  {}
-func (*Select) IStatement() {}
-func (*Insert) IStatement() {}
-func (*Update) IStatement() {}
-func (*Delete) IStatement() {}
-func (*Set) IStatement()    {}
-func (*DDL) IStatement()    {}
-func (*Other) IStatement()  {}
+func (*Union) IStatement()   {}
+func (*Select) IStatement()  {}
+func (*Insert) IStatement()  {}
+func (*Update) IStatement()  {}
+func (*Delete) IStatement()  {}
+func (*Set) IStatement()     {}
+func (*DDL) IStatement()     {}
+func (*Other) IStatement()   {}
 func (Comments) IStatement() {}
+
+// Statements represents a set of statements.
+type Statements []Statement
+
+func (Statements) IStatement() {}
+func (sts Statements) Format(buf *TrackedBuffer) {
+	if len(sts) == 0 {
+		return
+	}
+	if len(sts) == 1 {
+		sts[0].Format(buf)
+		return
+	}
+	format := "%v"
+	for i := 1; i < len(sts); i++ {
+		format += " ; %v"
+	}
+	var params []interface{}
+	for _, s := range []Statement(sts) {
+		params = append(params, s)
+	}
+	buf.Myprintf(format, params...)
+}
 
 // SelectStatement any SELECT statement.
 type SelectStatement interface {

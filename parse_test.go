@@ -39,6 +39,25 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// TestFullFileParse will test to make sure we can handle files with multiple sql statments, and comments.
+func TestFullFileParse(t *testing.T) {
+	var sql = `
+	/* Here is a comment. */
+	-- Here is a mysql comment
+	select /* middle */ a /* end  */ ;
+	-- Another comment
+	select b from b where b.id = 1;
+	`
+	tree, err := Parse(sql)
+	// Don't know what to expect yet. Should be two statements.
+	if err != nil {
+		t.Error(fmt.Sprintf("SQL:\n%v\n Error:\n%v\n", sql, err))
+		return
+	}
+	out := String(tree)
+	t.Error(fmt.Sprintf("SQL:\n%v\nFmt:\n%v\nAST:\n%q\n", sql, out, tree))
+}
+
 func BenchmarkParse1(b *testing.B) {
 	sql := "select 'abcd', 20, 30.0, eid from a where 1=eid and name='3'"
 	for i := 0; i < b.N; i++ {

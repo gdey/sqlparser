@@ -1,0 +1,1 @@
+select a, b form b where b.id=1;

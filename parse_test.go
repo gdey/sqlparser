@@ -41,28 +41,58 @@ func TestParse(t *testing.T) {
 }
 
 // TestFullFileParse will test to make sure we can handle files with multiple sql statments, and comments.
-func TestFullFileParse(t *testing.T) {
+func TestFullFilePassParse(t *testing.T) {
 	// the test case are the files in this directory. The expected file is located in the expected
 	// directory.
 	for _, name := range glob("sqlparser_test/full_file/pass/*.sql") {
-		expectedName := "sqlparser_test/full_file/pass/expected/" + filepath.Base(name)
 		sql, err := ioutil.ReadFile(name)
 		if err != nil {
 			t.Errorf("Skipping test %v, got error trying to load it: %v", name, err)
 			continue
 		}
+		expectedName := "sqlparser_test/full_file/pass/expected/" + filepath.Base(name)
 		esql, err := ioutil.ReadFile(expectedName)
 		if err != nil {
 			t.Errorf("Skipping test %v, got error trying to load expected file(%v): %v", name, expectedName, err)
 			continue
 		}
 		tree, err := Parse(string(sql))
+		if err != nil {
+			t.Errorf("Failed test %v: Got error: %v", err)
+		}
 		out := String(tree)
 		if out != string(esql) {
 			sesql := string(esql)
 			t.Errorf("Failed test %v:\nexpected(%v):\n[%v]\ngot(%v):\n[%v]\n", name, len(sesql), sesql, len(out), out)
 			fmt.Printf("Failed test %v:\nexpected(%v):\n[%v]\ngot(%v):\n[%v]\n", name, len(sesql), sesql, len(out), out)
 		}
+	}
+}
+
+// TestFullFileParse will test to make sure we can handle files with multiple sql statments, and comments.
+func TestFullFileFailParse(t *testing.T) {
+	// the test case are the files in this directory. The expected file is located in the expected
+	// directory.
+	for _, name := range glob("sqlparser_test/full_file/fail/*.sql") {
+		sql, err := ioutil.ReadFile(name)
+		if err != nil {
+			t.Errorf("Skipping test %v, got error trying to load it: %v", name, err)
+			continue
+		}
+		/*
+			expectedName := "sqlparser_test/full_file/fail/expected/" + filepath.Base(name)
+			esql, err := ioutil.ReadFile(expectedName)
+			if err != nil {
+				t.Errorf("Skipping test %v, got error trying to load expected file(%v): %v", name, expectedName, err)
+				continue
+			}
+		*/
+		tree, err := Parse(string(sql))
+		if err == nil {
+			out := String(tree)
+			t.Errorf("Failed test %v , expected error Got(%v)\n%v", name, len(out), out)
+		}
+		t.Logf("Got expected error (%v)", err)
 	}
 }
 

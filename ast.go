@@ -62,6 +62,7 @@ func (*Delete) IStatement() {}
 func (*Set) IStatement()    {}
 func (*DDL) IStatement()    {}
 func (*Other) IStatement()  {}
+func (Comments) IStatement() {}
 
 // SelectStatement any SELECT statement.
 type SelectStatement interface {
@@ -239,6 +240,18 @@ func (node Comments) Format(buf *TrackedBuffer) {
 	for _, c := range node {
 		buf.Myprintf("%s ", c)
 	}
+}
+
+// Will check to see if the bytes are just spaces, if so we will ignore the comment.
+func (node Comments) IsEmpty() bool {
+	// It's empty if all the comments in the node are empty.
+	var count int
+	for _, c := range node {
+		if strings.TrimSpace(string(c)) == "" {
+			count++
+		}
+	}
+	return count == len(node)
 }
 
 // SelectExprs represents SELECT expressions.

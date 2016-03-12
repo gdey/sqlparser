@@ -191,6 +191,8 @@ func (tkn *Tokenizer) Scan() (int, []byte) {
 			} else {
 				return int(ch), nil
 			}
+		case '#':
+			return tkn.scanCommentType1("#")
 		case '<':
 			switch tkn.lastChar {
 			case '>':

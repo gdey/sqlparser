@@ -43,10 +43,10 @@ func TestParse(t *testing.T) {
 func TestFullFileParse(t *testing.T) {
 	var sql = `
 	/* Here is a comment. */
-	-- Here is a mysql comment
+	# Here is a mysql comment
 	select /* middle */ a /* end  */ ;
 	-- Another comment
-	select b from b where b.id = 1;
+	select b, "#",Database() from b where b.id = 1;
 	`
 	tree, err := Parse(sql)
 	// Don't know what to expect yet. Should be two statements.

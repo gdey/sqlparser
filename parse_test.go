@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,21 +42,28 @@ func TestParse(t *testing.T) {
 
 // TestFullFileParse will test to make sure we can handle files with multiple sql statments, and comments.
 func TestFullFileParse(t *testing.T) {
-	var sql = `
-	/* Here is a comment. */
-	# Here is a mysql comment
-	select /* middle */ a /* end  */ ;
-	-- Another comment
-	select b, "#",Database() from b where b.id = 1;
-	`
-	tree, err := Parse(sql)
-	// Don't know what to expect yet. Should be two statements.
-	if err != nil {
-		t.Error(fmt.Sprintf("SQL:\n%v\n Error:\n%v\n", sql, err))
-		return
+	// the test case are the files in this directory. The expected file is located in the expected
+	// directory.
+	for _, name := range glob("sqlparser_test/full_file/pass/*.sql") {
+		expectedName := "sqlparser_test/full_file/pass/expected/" + filepath.Base(name)
+		sql, err := ioutil.ReadFile(name)
+		if err != nil {
+			t.Errorf("Skipping test %v, got error trying to load it: %v", name, err)
+			continue
+		}
+		esql, err := ioutil.ReadFile(expectedName)
+		if err != nil {
+			t.Errorf("Skipping test %v, got error trying to load expected file(%v): %v", name, expectedName, err)
+			continue
+		}
+		tree, err := Parse(string(sql))
+		out := String(tree)
+		if out != string(esql) {
+			sesql := string(esql)
+			t.Errorf("Failed test %v:\nexpected(%v):\n[%v]\ngot(%v):\n[%v]\n", name, len(sesql), sesql, len(out), out)
+			fmt.Printf("Failed test %v:\nexpected(%v):\n[%v]\ngot(%v):\n[%v]\n", name, len(sesql), sesql, len(out), out)
+		}
 	}
-	out := String(tree)
-	t.Error(fmt.Sprintf("SQL:\n%v\nFmt:\n%v\nAST:\n%q\n", sql, out, tree))
 }
 
 func BenchmarkParse1(b *testing.B) {

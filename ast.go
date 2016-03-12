@@ -78,6 +78,11 @@ func (sts Statements) Format(buf *TrackedBuffer) {
 	}
 	format := "%v"
 	for i := 1; i < len(sts); i++ {
+		_, ok := sts[i-1].(Comments)
+		if ok {
+			format += "\n%v"
+			continue
+		}
 		format += " ; %v"
 	}
 	var params []interface{}

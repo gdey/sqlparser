@@ -7,6 +7,7 @@ package sqlparser
 import (
 	"bytes"
 	"fmt"
+	"log"
 )
 
 // TrackedBuffer is used to rebuild a query from the ast.
@@ -72,7 +73,15 @@ func (buf *TrackedBuffer) Myprintf(format string, values ...interface{}) {
 				panic(fmt.Sprintf("unexpected type %T", v))
 			}
 		case 'v':
-			node := values[fieldnum].(SQLNode)
+			node, ok := values[fieldnum].(SQLNode)
+			if !ok {
+				log.Printf("Failed to convert to SQLNode. %T", values[fieldnum])
+				break
+			}
+			if node == nil {
+				log.Printf("Node was nil.")
+				break
+			}
 			if buf.nodeFormatter == nil {
 				node.Format(buf)
 			} else {

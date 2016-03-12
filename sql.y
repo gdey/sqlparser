@@ -155,7 +155,16 @@ any_command:
   }
 
 commands:
-comment_opt command
+comment_opt
+{
+    comment := Comments($1)
+    if comment.IsEmpty() {
+      $$ = Statements([]Statement{})
+    } else {
+      $$ = Statements([]Statement{comment})
+    }
+}
+| comment_opt command
   {
     comment := Comments($1)
     if comment.IsEmpty() {

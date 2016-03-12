@@ -8,8 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
-	"github.com/zhenjl/sqlparser/sqltypes"
+	"github.com/gdey/sqlparser/sqltypes"
 )
 
 // Instructions for creating new types: If a type

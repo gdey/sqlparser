@@ -100,6 +100,10 @@ const (
 )
 
 func (node *Select) Format(buf *TrackedBuffer) {
+	if len(node.From) == 0 {
+		buf.Myprintf("select %v%s%v", node.Comments, node.Distinct, node.SelectExprs)
+		return
+	}
 	buf.Myprintf("select %v%s%v from %v%v%v%v%v%v%s",
 		node.Comments, node.Distinct, node.SelectExprs,
 		node.From, node.Where,

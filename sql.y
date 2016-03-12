@@ -173,6 +173,10 @@ select_statement:
   {
     $$ = &Select{Comments: Comments($2), Distinct: $3, SelectExprs: $4, From: $6, Where: NewWhere(AST_WHERE, $7), GroupBy: GroupBy($8), Having: NewWhere(AST_HAVING, $9), OrderBy: $10, Limit: $11, Lock: $12}
   }
+| SELECT comment_opt distinct_opt select_expression_list
+  {
+    $$ = &Select{Comments: Comments($2), Distinct: $3, SelectExprs: $4 }
+  }
 | select_statement union_op select_statement %prec UNION
   {
     $$ = &Union{Type: $2, Left: $1, Right: $3}

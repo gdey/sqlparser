@@ -5,8 +5,9 @@
 package sqlparser
 
 import (
-	"errors"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"strconv"
 	"strings"
 
@@ -30,9 +31,27 @@ import (
 func Parse(sql string) (Statement, error) {
 	tokenizer := NewStringTokenizer(sql)
 	if yyParse(tokenizer) != 0 {
-		return nil, errors.New(tokenizer.LastError)
+		return nil, tokenizer.LastError
 	}
 	return tokenizer.ParseTree, nil
+}
+
+// ParseFile parses a sql file, and returns the statments contained in the file.
+func ParseFile(fn string) (Statement, error) {
+	buff, err := ioutil.ReadFile(fn)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(string(buff))
+}
+
+// ParseReader takes an io.Reader and returns the statement. This is not a streaming parser, so it will read everything into memory before trying to parse it.
+func ParseReader(r io.Reader) (Statement, error) {
+	buff, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(string(buff))
 }
 
 // SQLNode defines the interface for all nodes

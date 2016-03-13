@@ -15,6 +15,24 @@ import (
 
 const EOFCHAR = 0x100
 
+// TokenizerError is the struct used to hold the errors if there is any from
+// Parsing.
+type TokenizerError struct {
+	Err      string
+	Position int
+	ErrToken []byte
+}
+
+func (te *TokenizerError) Error() string {
+	if te == nil { // no error?
+		return ""
+	}
+	if te.ErrToken != nil {
+		return fmt.Sprintf("%s at position %v near %s", te.Err, te.Position, te.ErrToken)
+	}
+	return fmt.Sprintf("%s at position %v", te.Err, te.Position)
+}
+
 // Tokenizer is the struct used to generate SQL
 // tokens for the parser.
 type Tokenizer struct {
@@ -24,7 +42,7 @@ type Tokenizer struct {
 	lastChar      uint16
 	Position      int
 	errorToken    []byte
-	LastError     string
+	LastError     *TokenizerError
 	posVarIndex   int
 	ParseTree     Statement
 }
@@ -128,13 +146,11 @@ func (tkn *Tokenizer) Lex(lval *yySymType) int {
 
 // Error is called by go yacc if there's a parsing error.
 func (tkn *Tokenizer) Error(err string) {
-	buf := bytes.NewBuffer(make([]byte, 0, 32))
-	if tkn.errorToken != nil {
-		fmt.Fprintf(buf, "%s at position %v near %s", err, tkn.Position, tkn.errorToken)
-	} else {
-		fmt.Fprintf(buf, "%s at position %v", err, tkn.Position)
+	tkn.LastError = &TokenizerError{
+		Err:      err,
+		Position: tkn.Position,
+		ErrToken: tkn.errorToken,
 	}
-	tkn.LastError = buf.String()
 }
 
 // Scan scans the tokenizer for the next token and returns

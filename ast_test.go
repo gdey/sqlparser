@@ -11,13 +11,13 @@ func TestWhere(t *testing.T) {
 	buf := NewTrackedBuffer(nil)
 	w.Format(buf)
 	if buf.String() != "" {
-		t.Errorf("w.Format(nil): %q, want \"\"", buf.String)
+		t.Errorf("w.Format(nil): %q, want \"\"", buf.String())
 	}
 	w = NewWhere(AST_WHERE, nil)
 	buf = NewTrackedBuffer(nil)
 	w.Format(buf)
 	if buf.String() != "" {
-		t.Errorf("w.Format(&Where{nil}: %q, want \"\"", buf.String)
+		t.Errorf("w.Format(&Where{nil}: %q, want \"\"", buf.String())
 	}
 }
 

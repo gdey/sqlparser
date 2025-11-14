@@ -6,7 +6,6 @@ package main
 
 import (
 	"flag"
-	"io/ioutil"
 	"os"
 
 	"github.com/gdey/sqlparser"
@@ -17,9 +16,10 @@ const SytnaxErrorCode = 1
 // FormatSQL will walk the tree and produce "pretty" SQL.
 // Given a statement like: select a,b from a where a = 1
 // Return
-//    SELECT a, b
-//    FROM a
-//    WHERE a = 1;
+//
+//	SELECT a, b
+//	FROM a
+//	WHERE a = 1;
 func formatSQL(tree sqlparser.Statement) (string, error) {
 	return "", nil
 }
@@ -30,7 +30,7 @@ func main() {
 
 	for i := 1; i < len(os.Args); i++ {
 		file := os.Args[i]
-		buf, err := ioutil.ReadFile(file)
+		buf, err := os.ReadFile(file)
 		if err != nil {
 			panic(err)
 		}

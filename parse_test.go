@@ -8,7 +8,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +34,7 @@ func TestParse(t *testing.T) {
 			out = String(tree)
 		}
 		if out != tcase.output {
-			t.Error(fmt.Sprintf("File:%s Line:%v\n%q\n%q", tcase.file, tcase.lineno, tcase.output, out))
+			t.Errorf("File:%s Line:%v\n%q\n%q", tcase.file, tcase.lineno, tcase.output, out)
 		}
 	}
 }
@@ -45,20 +44,20 @@ func TestFullFilePassParse(t *testing.T) {
 	// the test case are the files in this directory. The expected file is located in the expected
 	// directory.
 	for _, name := range glob("sqlparser_test/full_file/pass/*.sql") {
-		sql, err := ioutil.ReadFile(name)
+		sql, err := os.ReadFile(name)
 		if err != nil {
 			t.Errorf("Skipping test %v, got error trying to load it: %v", name, err)
 			continue
 		}
 		expectedName := "sqlparser_test/full_file/pass/expected/" + filepath.Base(name)
-		esql, err := ioutil.ReadFile(expectedName)
+		esql, err := os.ReadFile(expectedName)
 		if err != nil {
 			t.Errorf("Skipping test %v, got error trying to load expected file(%v): %v", name, expectedName, err)
 			continue
 		}
 		tree, err := Parse(string(sql))
 		if err != nil {
-			t.Errorf("Failed test %v: Got error: %v", err)
+			t.Errorf("Failed test %v: Got error: %v", t.Name(), err)
 		}
 		out := String(tree)
 		if out != string(esql) {
@@ -74,14 +73,14 @@ func TestFullFileFailParse(t *testing.T) {
 	// the test case are the files in this directory. The expected file is located in the expected
 	// directory.
 	for _, name := range glob("sqlparser_test/full_file/fail/*.sql") {
-		sql, err := ioutil.ReadFile(name)
+		sql, err := os.ReadFile(name)
 		if err != nil {
 			t.Errorf("Skipping test %v, got error trying to load it: %v", name, err)
 			continue
 		}
 		/*
 			expectedName := "sqlparser_test/full_file/fail/expected/" + filepath.Base(name)
-			esql, err := ioutil.ReadFile(expectedName)
+			esql, err := os.ReadFile(expectedName)
 			if err != nil {
 				t.Errorf("Skipping test %v, got error trying to load expected file(%v): %v", name, expectedName, err)
 				continue

@@ -827,6 +827,11 @@ when_expression:
   {
     $$ = &When{Cond: $2, Val: $4}
   }
+| WHEN value_expression THEN value_expression
+  {
+    /* Bare value in WHEN: treat as truth test (IS NOT NULL) */
+    $$ = &When{Cond: &NullCheck{Operator: AST_IS_NOT_NULL, Expr: $2}, Val: $4}
+  }
 
 else_expression_opt:
   {

@@ -65,9 +65,13 @@ CREATE TABLE addresses AS
 		ain
 ;
 
-UPDATE addresses SET jurisdiction = proper(jurisdiction) WHERE jurisdiction IS NOT NULL;
+UPDATE addresses SET jurisdiction = CASE
+	WHEN jurisdiction IS NOT NULL THEN proper(jurisdiction)
+END;
 
-UPDATE addresses SET postal_city = proper(postal_city) WHERE postal_city IS NOT NULL;
+UPDATE addresses SET postal_city = CASE
+	WHEN postal_city IS NOT NULL THEN proper(postal_city)
+END;
 
 -- Add a hyphen to 9-character zip codes
 CREATE INDEX addresses_postal_idx ON addresses(postal);
@@ -82,7 +86,16 @@ SELECT err_if(RecoverGeometryColumn('addresses', 'geom_src', 2229, 'MULTIPOLYGON
 
 -- Use the parcel geometry to create a point for the main geom_4326 column
 SELECT AddGeometryColumn('addresses', 'geom_4326', 4326, 'POINT', 'XY');
-UPDATE addresses SET geom_4326 = ST_Transform(ST_Centroid(geom_src), 4326);
+UPDATE addresses SET geom_4326 = ST_Transform(
+	CASE 
+		WHEN 
+			ST_Contains(geom_src, ST_Centroid(geom_src)) 
+		THEN 
+			ST_Centroid(geom_src)
+		ELSE
+			ST_PointOnSurface(geom_src)
+	END
+, 4326);
 
 -- Create and populate the geom_3857 column
 SELECT AddGeometryColumn('addresses', 'geom_3857', 3857, 'POINT', 'XY');

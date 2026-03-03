@@ -162,6 +162,21 @@ func iterateFiles(pattern string) (testCaseIterator chan testCase) {
 	return testCaseIterator
 }
 
+func TestCaseWhenBareExpression(t *testing.T) {
+	// WHEN with bare value (truth test) and WHEN with boolean_expression
+	sql := `UPDATE t SET x = CASE WHEN ST_Contains(a, b) THEN 1 WHEN col IS NOT NULL THEN 2 END`
+	tree, _, err := Parse(sql)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	_ = tree
+	// Round-trip: parse and re-format
+	out := String(tree)
+	if out == "" {
+		t.Error("expected non-empty String(tree)")
+	}
+}
+
 func TestCreateTableAsSelect(t *testing.T) {
 	sql := "CREATE TABLE addresses AS SELECT 1 FROM parcels_data"
 	tree, _, err := Parse(sql)

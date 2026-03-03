@@ -16,14 +16,25 @@ import (
 
 const SytnaxErrorCode = 1
 
+const defaultIndent = "    "
+
+// FormatOptions controls formatting behavior.
+type FormatOptions struct {
+	// MaxFieldsInline: when number of SELECT fields, GROUP BY, or ORDER BY items
+	// exceeds this value, each item is placed on its own line with leading comma.
+	// Zero means always keep on one line.
+	MaxFieldsInline int
+}
+
 // formatSQL produces "pretty" SQL from the parse tree. When tree is PositionedStatements
 // and comments is non-nil, comments are interleaved by source position.
-func formatSQL(tree sqlparser.Statement, comments []sqlparser.CommentEntry) (string, error) {
+func formatSQL(tree sqlparser.Statement, comments []sqlparser.CommentEntry, opts FormatOptions) (string, error) {
 	if posStmts, ok := tree.(sqlparser.PositionedStatements); ok {
-		return formatWithPositionedComments(posStmts, comments)
+		return formatWithPositionedComments(posStmts, comments, opts)
 	}
 	// Fallback: format tree only (no position-based comment interleaving).
-	buf := sqlparser.NewTrackedBuffer(prettyFormat)
+	formatter := makePrettyFormat(opts)
+	buf := sqlparser.NewTrackedBuffer(formatter)
 	buf.Myprintf("%v", tree)
 	s := buf.String()
 	if s != "" && !strings.HasSuffix(s, ";") && !endsWithCommentOnly(tree) {
@@ -34,7 +45,7 @@ func formatSQL(tree sqlparser.Statement, comments []sqlparser.CommentEntry) (str
 
 // formatWithPositionedComments merges statements and comments by position and writes formatted SQL.
 // Comments inside a statement's [Start, End) are skipped (they are in the AST and appear in the formatted statement).
-func formatWithPositionedComments(stmts sqlparser.PositionedStatements, comments []sqlparser.CommentEntry) (string, error) {
+func formatWithPositionedComments(stmts sqlparser.PositionedStatements, comments []sqlparser.CommentEntry, opts FormatOptions) (string, error) {
 	type event struct {
 		pos       int
 		end       int
@@ -59,7 +70,8 @@ func formatWithPositionedComments(stmts sqlparser.PositionedStatements, comments
 			}
 		} else if ev.statement != nil {
 			// Use no-comments formatter so all comments come from CommentsTable only (no duplicates).
-			buf := sqlparser.NewTrackedBuffer(prettyFormatNoComments)
+			formatter := makePrettyFormatNoComments(opts)
+			buf := sqlparser.NewTrackedBuffer(formatter)
 			buf.Myprintf("%v", ev.statement)
 			s := buf.String()
 			b.WriteString(s)
@@ -97,8 +109,15 @@ func formatWithDefault(node sqlparser.SQLNode) string {
 	return b.String()
 }
 
+// makePrettyFormat returns a formatter that uses the given options (e.g. max fields inline, leading comma).
+func makePrettyFormat(opts FormatOptions) func(*sqlparser.TrackedBuffer, sqlparser.SQLNode) {
+	return func(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
+		prettyFormat(buf, node, opts)
+	}
+}
+
 // prettyFormat formats nodes with newlines and uppercase keywords where applicable.
-func prettyFormat(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
+func prettyFormat(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode, opts FormatOptions) {
 	switch n := node.(type) {
 	case sqlparser.PositionedStatements:
 		for i, ps := range n {
@@ -106,12 +125,12 @@ func prettyFormat(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
 				buf.WriteString(" ;\n\n")
 			}
 			if ps.Statement != nil {
-				prettyFormat(buf, ps.Statement)
+				prettyFormat(buf, ps.Statement, opts)
 			}
 		}
 	case sqlparser.PositionStatement:
 		if n.Statement != nil {
-			prettyFormat(buf, n.Statement)
+			prettyFormat(buf, n.Statement, opts)
 		}
 	case sqlparser.Statements:
 		for i, st := range n {
@@ -121,16 +140,15 @@ func prettyFormat(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
 				if prevIsComment && currIsComment {
 					buf.WriteString("\n\n")
 				} else if prevIsComment {
-					// Comment followed by statement: newlines only, no " ;"
 					buf.WriteString("\n\n")
 				} else {
 					buf.WriteString(" ;\n\n")
 				}
 			}
-			prettyFormat(buf, st)
+			prettyFormat(buf, st, opts)
 		}
 	case *sqlparser.Select:
-		formatPrettySelect(buf, n)
+		formatPrettySelect(buf, n, opts)
 	case *sqlparser.Union:
 		buf.WriteString(formatWithDefault(n.Left))
 		buf.WriteString(" ")
@@ -146,7 +164,6 @@ func prettyFormat(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
 			buf.WriteString(s)
 		}
 	case *sqlparser.AliasedTableExpr:
-		// Output Comments (e.g. "-- nice little short cut") which default Format omits.
 		buf.Myprintf("%v", n.Expr)
 		if n.As != nil {
 			buf.Myprintf(" as %s", n.As)
@@ -159,14 +176,17 @@ func prettyFormat(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
 			buf.Myprintf("%v", n.Hints)
 		}
 	default:
-		// Delegate to node's Format so sub-nodes (e.g. ValArg) use this formatter.
 		node.Format(buf)
 	}
 }
 
-// prettyFormatNoComments is like prettyFormat but omits AST comment fields so that
-// when used with position-based comment interleaving, all comments come from CommentsTable only.
-func prettyFormatNoComments(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
+func makePrettyFormatNoComments(opts FormatOptions) func(*sqlparser.TrackedBuffer, sqlparser.SQLNode) {
+	return func(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
+		prettyFormatNoComments(buf, node, opts)
+	}
+}
+
+func prettyFormatNoComments(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode, opts FormatOptions) {
 	switch n := node.(type) {
 	case sqlparser.PositionedStatements:
 		for i, ps := range n {
@@ -174,15 +194,15 @@ func prettyFormatNoComments(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode
 				buf.WriteString(" ;\n\n")
 			}
 			if ps.Statement != nil {
-				prettyFormatNoComments(buf, ps.Statement)
+				prettyFormatNoComments(buf, ps.Statement, opts)
 			}
 		}
 	case sqlparser.PositionStatement:
 		if n.Statement != nil {
-			prettyFormatNoComments(buf, n.Statement)
+			prettyFormatNoComments(buf, n.Statement, opts)
 		}
 	case *sqlparser.Select:
-		formatPrettySelectNoComments(buf, n)
+		formatPrettySelectNoComments(buf, n, opts)
 	case *sqlparser.Union:
 		buf.WriteString(formatWithDefault(n.Left))
 		buf.WriteString(" ")
@@ -209,31 +229,51 @@ func prettyFormatNoComments(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode
 	}
 }
 
-func formatPrettySelectNoComments(buf *sqlparser.TrackedBuffer, n *sqlparser.Select) {
+// formatListWithLeadingComma writes each item on its own line with leading comma when count > maxInline.
+func formatListWithLeadingComma(buf *sqlparser.TrackedBuffer, maxInline int, count int, formatItem func(i int)) {
+	if maxInline > 0 && count > maxInline {
+		for i := 0; i < count; i++ {
+			if i > 0 {
+				buf.WriteString("\n")
+				buf.WriteString(defaultIndent)
+				buf.WriteString(", ")
+			} else {
+				buf.WriteString("\n")
+				buf.WriteString(defaultIndent)
+			}
+			formatItem(i)
+		}
+	} else {
+		for i := 0; i < count; i++ {
+			if i > 0 {
+				buf.WriteString(", ")
+			}
+			formatItem(i)
+		}
+	}
+}
+
+func formatPrettySelectNoComments(buf *sqlparser.TrackedBuffer, n *sqlparser.Select, opts FormatOptions) {
 	buf.WriteString("SELECT ")
-	// Omit n.Comments - they come from CommentsTable
 	buf.WriteString(strings.ToUpper(n.Distinct))
-	buf.Myprintf("%v", n.SelectExprs)
+	formatListWithLeadingComma(buf, opts.MaxFieldsInline, len(n.SelectExprs), func(i int) {
+		buf.Myprintf("%v", n.SelectExprs[i])
+	})
 	if len(n.From) > 0 {
 		buf.WriteString("\nFROM ")
 		buf.Myprintf("%v", n.From)
-		// Omit n.FromComments
 	}
 	if n.Where != nil {
 		buf.WriteString("\n")
 		buf.WriteString(strings.ToUpper(n.Where.Type))
 		buf.WriteString(" ")
-		// Omit n.Where.Comments
 		buf.Myprintf("%v", n.Where.Expr)
 	}
 	if len(n.GroupBy) > 0 {
 		buf.WriteString("\nGROUP BY ")
-		for i, e := range n.GroupBy {
-			if i > 0 {
-				buf.WriteString(", ")
-			}
-			buf.Myprintf("%v", e)
-		}
+		formatListWithLeadingComma(buf, opts.MaxFieldsInline, len(n.GroupBy), func(i int) {
+			buf.Myprintf("%v", n.GroupBy[i])
+		})
 	}
 	if n.Having != nil {
 		buf.WriteString("\nHAVING ")
@@ -241,12 +281,9 @@ func formatPrettySelectNoComments(buf *sqlparser.TrackedBuffer, n *sqlparser.Sel
 	}
 	if len(n.OrderBy) > 0 {
 		buf.WriteString("\nORDER BY ")
-		for i, o := range n.OrderBy {
-			if i > 0 {
-				buf.WriteString(", ")
-			}
-			buf.Myprintf("%v", o)
-		}
+		formatListWithLeadingComma(buf, opts.MaxFieldsInline, len(n.OrderBy), func(i int) {
+			buf.Myprintf("%v", n.OrderBy[i])
+		})
 	}
 	if n.Limit != nil {
 		buf.WriteString("\nLIMIT ")
@@ -262,11 +299,13 @@ func formatPrettySelectNoComments(buf *sqlparser.TrackedBuffer, n *sqlparser.Sel
 	}
 }
 
-func formatPrettySelect(buf *sqlparser.TrackedBuffer, n *sqlparser.Select) {
+func formatPrettySelect(buf *sqlparser.TrackedBuffer, n *sqlparser.Select, opts FormatOptions) {
 	buf.WriteString("SELECT ")
 	buf.Myprintf("%v", n.Comments)
 	buf.WriteString(strings.ToUpper(n.Distinct))
-	buf.Myprintf("%v", n.SelectExprs)
+	formatListWithLeadingComma(buf, opts.MaxFieldsInline, len(n.SelectExprs), func(i int) {
+		buf.Myprintf("%v", n.SelectExprs[i])
+	})
 	if len(n.From) > 0 {
 		buf.WriteString("\nFROM ")
 		buf.Myprintf("%v", n.From)
@@ -281,12 +320,9 @@ func formatPrettySelect(buf *sqlparser.TrackedBuffer, n *sqlparser.Select) {
 	}
 	if len(n.GroupBy) > 0 {
 		buf.WriteString("\nGROUP BY ")
-		for i, e := range n.GroupBy {
-			if i > 0 {
-				buf.WriteString(", ")
-			}
-			buf.Myprintf("%v", e)
-		}
+		formatListWithLeadingComma(buf, opts.MaxFieldsInline, len(n.GroupBy), func(i int) {
+			buf.Myprintf("%v", n.GroupBy[i])
+		})
 	}
 	if n.Having != nil {
 		buf.WriteString("\nHAVING ")
@@ -294,12 +330,9 @@ func formatPrettySelect(buf *sqlparser.TrackedBuffer, n *sqlparser.Select) {
 	}
 	if len(n.OrderBy) > 0 {
 		buf.WriteString("\nORDER BY ")
-		for i, o := range n.OrderBy {
-			if i > 0 {
-				buf.WriteString(", ")
-			}
-			buf.Myprintf("%v", o)
-		}
+		formatListWithLeadingComma(buf, opts.MaxFieldsInline, len(n.OrderBy), func(i int) {
+			buf.Myprintf("%v", n.OrderBy[i])
+		})
 	}
 	if n.Limit != nil {
 		buf.WriteString("\nLIMIT ")
@@ -315,12 +348,13 @@ func formatPrettySelect(buf *sqlparser.TrackedBuffer, n *sqlparser.Select) {
 	}
 }
 func main() {
-	// We will have flags later.
+	maxFieldsInline := flag.Int("max-fields-inline", 0, "when SELECT/GROUP BY/ORDER BY item count exceeds this, list each on its own line with leading comma (0 = always inline)")
 	flag.Parse()
+	opts := FormatOptions{MaxFieldsInline: *maxFieldsInline}
 	statusCode := 0
 
-	for i := 1; i < len(os.Args); i++ {
-		file := os.Args[i]
+	for i := 0; i < flag.NArg(); i++ {
+		file := flag.Arg(i)
 		buf, err := os.ReadFile(file)
 		if err != nil {
 			panic(err)
@@ -333,7 +367,7 @@ func main() {
 			statusCode = SytnaxErrorCode
 			continue
 		}
-		formatted, err := formatSQL(statement, commentEntries)
+		formatted, err := formatSQL(statement, commentEntries, opts)
 		if err != nil {
 			panic(err)
 		}

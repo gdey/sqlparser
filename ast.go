@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -54,6 +55,56 @@ func ParseReader(r io.Reader) (Statement, []CommentEntry, error) {
 	return Parse(string(buff))
 }
 
+// FormatWithComments produces SQL by interleaving the formatted tree with comments
+// by source position. Use this when tree is PositionedStatements to preserve
+// comment placement. Comments that fall inside a statement's [Start, End) are
+// omitted (they are assumed to be in the AST and appear in String(statement)).
+func FormatWithComments(tree Statement, comments []CommentEntry) string {
+	posStmts, ok := tree.(PositionedStatements)
+	if !ok {
+		return String(tree)
+	}
+	type event struct {
+		pos       int
+		comment   []byte
+		statement Statement
+		end       int // statement end; 0 for comments
+	}
+	var events []event
+	for _, ps := range posStmts {
+		events = append(events, event{pos: ps.Start, statement: ps.Statement, end: ps.End})
+	}
+	for _, c := range comments {
+		events = append(events, event{pos: c.Position, comment: c.Comment})
+	}
+	sort.Slice(events, func(i, j int) bool { return events[i].pos < events[j].pos })
+	var b strings.Builder
+	for i, ev := range events {
+		if len(ev.comment) > 0 {
+			insideStmt := false
+			for _, e := range events {
+				if e.end > 0 && ev.pos >= e.pos && ev.pos < e.end {
+					insideStmt = true
+					break
+				}
+			}
+			if insideStmt {
+				continue
+			}
+			b.Write(ev.comment)
+			if len(ev.comment) > 0 && ev.comment[len(ev.comment)-1] != '\n' {
+				b.WriteByte('\n')
+			}
+		} else if ev.statement != nil {
+			b.WriteString(String(ev.statement))
+			if i+1 < len(events) {
+				b.WriteString(" ; ")
+			}
+		}
+	}
+	return b.String()
+}
+
 type Positional[T any] struct {
 	Position int
 	Value    T
@@ -76,9 +127,43 @@ type PositionEmpty struct {
 	Position int
 }
 
+// PositionStatement holds a Statement and its extent (Start, End) in the source.
+// Used with CommentsTable to interleave comments when formatting.
+// Comments inside [Start, End) are assumed to be in the AST and are not emitted again.
 type PositionStatement struct {
-	Position int
-	Statement
+	Start     int
+	End       int
+	Statement Statement
+}
+
+// Position returns Start for backward compatibility.
+func (p PositionStatement) Position() int { return p.Start }
+
+func (PositionStatement) IStatement() {}
+
+// Format implements SQLNode by delegating to the inner Statement.
+func (p PositionStatement) Format(buf *TrackedBuffer) {
+	if p.Statement != nil {
+		p.Statement.Format(buf)
+	}
+}
+
+// PositionedStatements is a list of statements with start positions.
+// It implements Statement so it can be the parse tree root.
+type PositionedStatements []PositionStatement
+
+func (PositionedStatements) IStatement() {}
+
+// Format implements SQLNode by formatting each statement with " ;\n\n" between.
+func (p PositionedStatements) Format(buf *TrackedBuffer) {
+	for i, ps := range p {
+		if i > 0 {
+			buf.WriteString(" ; ")
+		}
+		if ps.Statement != nil {
+			ps.Statement.Format(buf)
+		}
+	}
 }
 
 // Statement represents a statement.
@@ -496,8 +581,9 @@ func (node *IndexHints) Format(buf *TrackedBuffer) {
 
 // Where represents a WHERE or HAVING clause.
 type Where struct {
-	Type string
-	Expr BoolExpr
+	Type    string
+	Comments Comments
+	Expr   BoolExpr
 }
 
 // Where.Type
@@ -519,7 +605,7 @@ func (node *Where) Format(buf *TrackedBuffer) {
 	if node == nil || node.Expr == nil {
 		return
 	}
-	buf.Myprintf(" %s %v", node.Type, node.Expr)
+	buf.Myprintf(" %s %v%v", node.Type, node.Comments, node.Expr)
 }
 
 // Expr represents an expression.
@@ -568,11 +654,15 @@ func (*KeyrangeExpr) IBoolExpr()   {}
 
 // AndExpr represents an AND expression.
 type AndExpr struct {
-	Left, Right BoolExpr
+	Left               BoolExpr
+	CommentsAfterLeft  Comments
+	CommentsBeforeRight Comments
+	Right              BoolExpr
+	CommentsAfterRight Comments
 }
 
 func (node *AndExpr) Format(buf *TrackedBuffer) {
-	buf.Myprintf("%v and %v", node.Left, node.Right)
+	buf.Myprintf("%v%v and %v%v%v", node.Left, node.CommentsAfterLeft, node.CommentsBeforeRight, node.Right, node.CommentsAfterRight)
 }
 
 // OrExpr represents an OR expression.

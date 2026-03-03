@@ -41,22 +41,47 @@ type CommentEntry struct {
 // Tokenizer is the struct used to generate SQL
 // tokens for the parser.
 type Tokenizer struct {
-	InStream      *strings.Reader
-	AllowComments bool
-	CommentsTable []CommentEntry
-	ForceEOF      bool
-	lastChar      uint16
-	Position      int
-	errorToken    []byte
-	LastError     *TokenizerError
-	posVarIndex   int
-	ParseTree     Statement
+	InStream                 *strings.Reader
+	AllowComments            bool
+	CommentsTable            []CommentEntry
+	ForceEOF                 bool
+	lastChar                 uint16
+	Position                 int
+	errorToken               []byte
+	LastError                *TokenizerError
+	posVarIndex              int
+	ParseTree                Statement
+	statementStartStack      []int // position when a top-level statement-start token was seen
+	nextTokenStartsStatement bool  // true after ';' or at start; next SELECT/INSERT/etc. starts a statement
 }
 
 // NewStringTokenizer creates a new Tokenizer for the
 // sql string.
 func NewStringTokenizer(sql string) *Tokenizer {
-	return &Tokenizer{InStream: strings.NewReader(sql)}
+	return &Tokenizer{
+		InStream:                 strings.NewReader(sql),
+		nextTokenStartsStatement: true,
+	}
+}
+
+// statementStartTokens are token types that begin a top-level statement.
+// When we see one and nextTokenStartsStatement is true, we push Position.
+var statementStartTokens = map[int]bool{
+	SELECT: true, INSERT: true, UPDATE: true, DELETE: true, SET: true,
+	CREATE: true, ALTER: true, RENAME: true, DROP: true, ANALYZE: true,
+	SHOW: true, DESCRIBE: true, EXPLAIN: true,
+}
+
+// GetAndPopStatementStart returns the position at which the current statement
+// started and clears it. Call from the grammar when reducing a "command".
+// Returns 0 if the stack is empty.
+func (tkn *Tokenizer) GetAndPopStatementStart() int {
+	if len(tkn.statementStartStack) == 0 {
+		return 0
+	}
+	pos := tkn.statementStartStack[len(tkn.statementStartStack)-1]
+	tkn.statementStartStack = tkn.statementStartStack[:len(tkn.statementStartStack)-1]
+	return pos
 }
 
 var keywords = map[string]int{
@@ -154,6 +179,13 @@ func (tkn *Tokenizer) Lex(lval *yySymType) int {
 	switch typ {
 	case ID, STRING, NUMBER, VALUE_ARG, LIST_ARG, COMMENT:
 		lval.bytes = val
+	}
+	// Track top-level statement start for position-based comment interleaving.
+	if typ == ';' {
+		tkn.nextTokenStartsStatement = true
+	} else if statementStartTokens[typ] && tkn.nextTokenStartsStatement {
+		tkn.statementStartStack = append(tkn.statementStartStack, startPos)
+		tkn.nextTokenStartsStatement = false
 	}
 	tkn.errorToken = val
 	return typ

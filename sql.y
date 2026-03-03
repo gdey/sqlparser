@@ -13,6 +13,10 @@ func SetParseTree(yylex interface{}, stmt Statement) {
   yylex.(*Tokenizer).ParseTree = stmt
 }
 
+func getStatementStart(yylex interface{}) int {
+  return yylex.(*Tokenizer).GetAndPopStatementStart()
+}
+
 func SetAllowComments(yylex interface{}, allow bool) {
   yylex.(*Tokenizer).AllowComments = allow
 }
@@ -72,6 +76,7 @@ var (
   updateExprs UpdateExprs
   updateExpr  *UpdateExpr
   position    int
+  positionedStatements PositionedStatements
 }
 
 
@@ -105,7 +110,7 @@ var (
 %start any_command
 
 %type <statement> command
-%type <statements> commands
+%type <positionedStatements> commands
 %type <selStmt> select_statement
 %type <statement> insert_statement update_statement delete_statement set_statement
 %type <statement> create_statement alter_statement rename_statement drop_statement
@@ -124,7 +129,7 @@ var (
 %type <tableName> dml_table_expression
 %type <indexHints> index_hint_list
 %type <bytes2> index_list
-%type <boolExpr> where_expression_opt
+%type <boolExpr> where_expression_opt having_opt
 %type <boolExpr> boolean_expression condition
 %type <str> compare
 %type <insRows> row_list
@@ -142,7 +147,6 @@ var (
 %type <when> when_expression
 %type <valExpr> value_expression_opt else_expression_opt
 %type <valExprs> group_by_opt
-%type <boolExpr> having_opt
 %type <orderBy> order_by_opt order_list
 %type <order> order
 %type <str> asc_desc_opt
@@ -167,39 +171,19 @@ any_command:
 commands:
 comment_opt
 {
-    comment := Comments($1)
-    if comment.IsEmpty() {
-      $$ = Statements([]Statement{})
-    } else {
-      $$ = Statements([]Statement{comment})
-    }
-}
+    $$ = PositionedStatements{}
+  }
 | comment_opt command
   {
-    comment := Comments($1)
-    if comment.IsEmpty() {
-      $$ = Statements([]Statement{$2})
-    } else {
-      $$ = Statements([]Statement{comment,$2})
-    }
+    $$ = PositionedStatements{PositionStatement{Start: getStatementStart(yylex), End: GetCurrentPos(yylex), Statement: $2}}
   }
 | commands ';' comment_opt command
   {
-    comment := Comments($3)
-    if comment.IsEmpty() {
-      $$ = Statements(append($1, $4))
-    } else {
-      $$ = Statements(append($1, comment, $4))
-    }
+    $$ = append($1, PositionStatement{Start: getStatementStart(yylex), End: GetCurrentPos(yylex), Statement: $4})
   }
 | commands ';' comment_opt
   {
-    comment := Comments($3)
-    if comment.IsEmpty() {
-      $$ = $1
-    } else {
-      $$ = Statements(append($1, comment))
-    }
+    $$ = $1
   }
 
 command:
@@ -447,7 +431,7 @@ table_expression_list:
 table_expression:
   simple_table_expression as_opt comment_opt index_hint_list
   {
-    $$ = &AliasedTableExpr{Position: GetCurrentPos(yylex), Expr:$1, As: $2, Hints: $4, Comments: Comments($3)}
+    $$ = &AliasedTableExpr{Position: GetCurrentPos(yylex), Expr:$1, As: $2, Hints: $4}
   }
 | '(' table_expression ')'
   {

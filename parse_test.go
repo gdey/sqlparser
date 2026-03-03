@@ -57,11 +57,11 @@ func TestFullFilePassParse(t *testing.T) {
 			t.Errorf("Skipping test %v, got error trying to load expected file(%v): %v", name, expectedName, err)
 			continue
 		}
-		tree, _, err := Parse(string(sql))
+		tree, commentEntries, err := Parse(string(sql))
 		if err != nil {
 			t.Errorf("Failed test %v: Got error: %v", t.Name(), err)
 		}
-		out := String(tree)
+		out := FormatWithComments(tree, commentEntries)
 		if out != string(esql) {
 			sesql := string(esql)
 			t.Errorf("Failed test %v:\nexpected(%v):\n[%v]\ngot(%v):\n[%v]\n", name, len(sesql), sesql, len(out), out)

@@ -119,3 +119,63 @@ func StringIn(str string, values ...string) bool {
 	}
 	return false
 }
+
+// TableNamesFromTableExprs returns the set of table names referenced in the
+// FROM clause (and in any nested JOINs or subqueries). Names are returned
+// as single identifiers (e.g. "parcels_data"); qualified names use the Name
+// only (the rightmost identifier).
+func TableNamesFromTableExprs(from TableExprs) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, e := range from {
+		tableNamesFromTableExpr(e, out)
+	}
+	return out
+}
+
+func tableNamesFromTableExpr(expr TableExpr, out map[string]struct{}) {
+	switch e := expr.(type) {
+	case *AliasedTableExpr:
+		tableNamesFromSimpleTableExpr(e.Expr, out)
+	case *JoinTableExpr:
+		tableNamesFromTableExpr(e.LeftExpr, out)
+		tableNamesFromTableExpr(e.RightExpr, out)
+	case *ParenTableExpr:
+		tableNamesFromTableExpr(e.Expr, out)
+	}
+}
+
+func tableNamesFromSimpleTableExpr(expr SimpleTableExpr, out map[string]struct{}) {
+	switch s := expr.(type) {
+	case *TableName:
+		out[string(s.Name)] = struct{}{}
+	case *Subquery:
+		tableNamesFromSelectStatement(s.Select, out)
+	}
+}
+
+func tableNamesFromSelectStatement(sel SelectStatement, out map[string]struct{}) {
+	switch s := sel.(type) {
+	case *Select:
+		if s.From != nil {
+			for _, e := range s.From {
+				tableNamesFromTableExpr(e, out)
+			}
+		}
+	case *Union:
+		tableNamesFromSelectStatement(s.Left, out)
+		tableNamesFromSelectStatement(s.Right, out)
+	}
+}
+
+// SelectStatementReferencesAny returns true if the given SelectStatement's
+// FROM clause (and nested subqueries) references any of the given table names.
+func SelectStatementReferencesAny(sel SelectStatement, tableNames map[string]struct{}) bool {
+	refs := make(map[string]struct{})
+	tableNamesFromSelectStatement(sel, refs)
+	for name := range refs {
+		if _, ok := tableNames[name]; ok {
+			return true
+		}
+	}
+	return false
+}

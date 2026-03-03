@@ -255,6 +255,10 @@ create_statement:
   {
     $$ = &DDL{Action: AST_CREATE, NewName: $4}
   }
+| CREATE TABLE not_exists_opt ID AS select_statement force_eof
+  {
+    $$ = &CreateTableAsSelect{Table: $4, Select: $6}
+  }
 | CREATE constraint_opt INDEX sql_id using_opt ON ID force_eof
   {
     // Change this to an alter statement

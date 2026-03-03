@@ -162,6 +162,32 @@ func iterateFiles(pattern string) (testCaseIterator chan testCase) {
 	return testCaseIterator
 }
 
+func TestCreateTableAsSelect(t *testing.T) {
+	sql := "CREATE TABLE addresses AS SELECT 1 FROM parcels_data"
+	tree, _, err := Parse(sql)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	pos, ok := tree.(PositionedStatements)
+	if !ok {
+		t.Fatalf("expected PositionedStatements, got %T", tree)
+	}
+	if len(pos) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(pos))
+	}
+	ctas, ok := pos[0].Statement.(*CreateTableAsSelect)
+	if !ok {
+		t.Fatalf("expected CreateTableAsSelect, got %T", pos[0].Statement)
+	}
+	if string(ctas.Table) != "addresses" {
+		t.Errorf("table name: got %q", ctas.Table)
+	}
+	refs := TableNamesFromTableExprs(ctas.Select.(*Select).From)
+	if _, ok := refs["parcels_data"]; !ok {
+		t.Errorf("expected parcels_data in FROM refs, got %v", refs)
+	}
+}
+
 func TestParseVarSQL(t *testing.T) {
 	filename := "testdata/sql_with_var.sql"
 	fileContent, err := os.ReadFile(filename)

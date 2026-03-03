@@ -178,8 +178,9 @@ func (*Insert) IStatement()  {}
 func (*Update) IStatement()  {}
 func (*Delete) IStatement()  {}
 func (*Set) IStatement()     {}
-func (*DDL) IStatement()     {}
-func (*Other) IStatement()   {}
+func (*DDL) IStatement()               {}
+func (*CreateTableAsSelect) IStatement() {}
+func (*Other) IStatement()             {}
 func (Comments) IStatement() {}
 
 // Statements represents a set of statements.
@@ -342,6 +343,16 @@ type Set struct {
 
 func (node *Set) Format(buf *TrackedBuffer) {
 	buf.Myprintf("set %v%v", node.Comments, node.Exprs)
+}
+
+// CreateTableAsSelect represents CREATE TABLE ... AS SELECT.
+type CreateTableAsSelect struct {
+	Table  []byte
+	Select SelectStatement
+}
+
+func (node *CreateTableAsSelect) Format(buf *TrackedBuffer) {
+	buf.Myprintf("create table %s as %v", node.Table, node.Select)
 }
 
 // DDL represents a CREATE, ALTER, DROP or RENAME statement.

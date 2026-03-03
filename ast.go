@@ -7,7 +7,7 @@ package sqlparser
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
+	"os"
 	"strconv"
 	"strings"
 
@@ -28,30 +28,35 @@ import (
 
 // Parse parses the sql and returns a Statement, which
 // is the AST representation of the query.
-func Parse(sql string) (Statement, error) {
+func Parse(sql string) (Statement, []CommentEntry, error) {
 	tokenizer := NewStringTokenizer(sql)
 	if yyParse(tokenizer) != 0 {
-		return nil, tokenizer.LastError
+		return nil, nil, tokenizer.LastError
 	}
-	return tokenizer.ParseTree, nil
+	return tokenizer.ParseTree, tokenizer.CommentsTable, nil
 }
 
 // ParseFile parses a sql file, and returns the statments contained in the file.
-func ParseFile(fn string) (Statement, error) {
-	buff, err := ioutil.ReadFile(fn)
+func ParseFile(fn string) (Statement, []CommentEntry, error) {
+	buff, err := os.ReadFile(fn)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return Parse(string(buff))
 }
 
 // ParseReader takes an io.Reader and returns the statement. This is not a streaming parser, so it will read everything into memory before trying to parse it.
-func ParseReader(r io.Reader) (Statement, error) {
-	buff, err := ioutil.ReadAll(r)
+func ParseReader(r io.Reader) (Statement, []CommentEntry, error) {
+	buff, err := io.ReadAll(r)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return Parse(string(buff))
+}
+
+type Positional[T any] struct {
+	Position int
+	Value    T
 }
 
 // SQLNode defines the interface for all nodes
@@ -65,6 +70,15 @@ func String(node SQLNode) string {
 	buf := NewTrackedBuffer(nil)
 	buf.Myprintf("%v", node)
 	return buf.String()
+}
+
+type PositionEmpty struct {
+	Position int
+}
+
+type PositionStatement struct {
+	Position int
+	Statement
 }
 
 // Statement represents a statement.
@@ -124,16 +138,17 @@ func (*Union) ISelectStatement()  {}
 
 // Select represents a SELECT statement.
 type Select struct {
-	Comments    Comments
-	Distinct    string
-	SelectExprs SelectExprs
-	From        TableExprs
-	Where       *Where
-	GroupBy     GroupBy
-	Having      *Where
-	OrderBy     OrderBy
-	Limit       *Limit
-	Lock        string
+	Comments     Comments
+	Distinct     string
+	SelectExprs  SelectExprs
+	From         TableExprs
+	FromComments Comments
+	Where        *Where
+	GroupBy      GroupBy
+	Having       *Where
+	OrderBy      OrderBy
+	Limit        *Limit
+	Lock         string
 }
 
 // Select.Distinct
@@ -383,9 +398,11 @@ func (*JoinTableExpr) ITableExpr()    {}
 // AliasedTableExpr represents a table expression
 // coupled with an optional alias or index hint.
 type AliasedTableExpr struct {
-	Expr  SimpleTableExpr
-	As    []byte
-	Hints *IndexHints
+	Comments Comments
+	Position int
+	Expr     SimpleTableExpr
+	As       []byte
+	Hints    *IndexHints
 }
 
 func (node *AliasedTableExpr) Format(buf *TrackedBuffer) {

@@ -5,7 +5,9 @@
 %{
 package sqlparser
 
-import "bytes"
+import (
+  "bytes"
+)
 
 func SetParseTree(yylex interface{}, stmt Statement) {
   yylex.(*Tokenizer).ParseTree = stmt
@@ -13,6 +15,10 @@ func SetParseTree(yylex interface{}, stmt Statement) {
 
 func SetAllowComments(yylex interface{}, allow bool) {
   yylex.(*Tokenizer).AllowComments = allow
+}
+
+func GetCurrentPos(yylex interface{}) int {
+  return yylex.(*Tokenizer).Position
 }
 
 func ForceEOF(yylex interface{}) {
@@ -27,6 +33,8 @@ var (
 )
 
 %}
+
+
 
 %union {
   empty       struct{}
@@ -63,16 +71,18 @@ var (
   insRows     InsertRows
   updateExprs UpdateExprs
   updateExpr  *UpdateExpr
+  position    int
 }
 
-%token LEX_ERROR
-%token <empty> SELECT INSERT UPDATE DELETE FROM WHERE GROUP HAVING ORDER BY LIMIT FOR
-%token <empty> ALL DISTINCT AS EXISTS IN IS LIKE BETWEEN NULL ASC DESC VALUES INTO DUPLICATE KEY DEFAULT SET LOCK KEYRANGE
-%token <bytes> ID STRING NUMBER VALUE_ARG LIST_ARG COMMENT
-%token <empty> LE GE NE NULL_SAFE_EQUAL
-%token <empty> '(' '=' '<' '>' '~'
 
-%left <empty> UNION MINUS EXCEPT INTERSECT
+%token LEX_ERROR
+%token <position> SELECT INSERT UPDATE DELETE FROM WHERE GROUP HAVING ORDER BY LIMIT FOR
+%token <position> ALL DISTINCT AS EXISTS IN IS LIKE BETWEEN NULL ASC DESC VALUES INTO DUPLICATE KEY DEFAULT SET LOCK KEYRANGE
+%token <bytes> ID STRING NUMBER VALUE_ARG LIST_ARG COMMENT
+%token <position> LE GE NE NULL_SAFE_EQUAL
+%token <position> '(' '=' '<' '>' '~'
+
+%left <position> UNION MINUS EXCEPT INTERSECT
 %left <empty> ','
 %left <empty> JOIN STRAIGHT_JOIN LEFT RIGHT INNER OUTER CROSS NATURAL USE FORCE
 %left <empty> ON
@@ -209,9 +219,9 @@ command:
 | other_statement
 
 select_statement:
-  SELECT comment_opt distinct_opt select_expression_list FROM table_expression_list where_expression_opt group_by_opt having_opt order_by_opt limit_opt lock_opt
+  SELECT comment_opt distinct_opt select_expression_list FROM comment_opt table_expression_list where_expression_opt group_by_opt having_opt order_by_opt limit_opt lock_opt
   {
-    $$ = &Select{Comments: Comments($2), Distinct: $3, SelectExprs: $4, From: $6, Where: NewWhere(AST_WHERE, $7), GroupBy: GroupBy($8), Having: NewWhere(AST_HAVING, $9), OrderBy: $10, Limit: $11, Lock: $12}
+    $$ = &Select{Comments: Comments($2), Distinct: $3, SelectExprs: $4, From: $7, FromComments: Comments($6), Where: NewWhere(AST_WHERE, $8), GroupBy: GroupBy($9), Having: NewWhere(AST_HAVING, $10), OrderBy: $11, Limit: $12, Lock: $13}
   }
 | SELECT comment_opt distinct_opt select_expression_list
   {
@@ -435,9 +445,9 @@ table_expression_list:
   }
 
 table_expression:
-  simple_table_expression as_opt index_hint_list
+  simple_table_expression as_opt comment_opt index_hint_list
   {
-    $$ = &AliasedTableExpr{Expr:$1, As: $2, Hints: $3}
+    $$ = &AliasedTableExpr{Position: GetCurrentPos(yylex), Expr:$1, As: $2, Hints: $4, Comments: Comments($3)}
   }
 | '(' table_expression ')'
   {
@@ -847,6 +857,10 @@ value:
   STRING
   {
     $$ = StrVal($1)
+  }
+| '$' NUMBER
+  {
+    $$ = ValArg(":v$"+string($2))
   }
 | NUMBER
   {

@@ -12,10 +12,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/davecgh/go-spew/spew"
 )
 
 func TestGen(t *testing.T) {
-	_, err := Parse("select :a from a where a in (:b)")
+	_, _, err := Parse("select :a from a where a in (:b)")
 	if err != nil {
 		t.Error(err)
 	}
@@ -26,7 +28,7 @@ func TestParse(t *testing.T) {
 		if tcase.output == "" {
 			tcase.output = tcase.input
 		}
-		tree, err := Parse(tcase.input)
+		tree, _, err := Parse(tcase.input)
 		var out string
 		if err != nil {
 			out = err.Error()
@@ -55,7 +57,7 @@ func TestFullFilePassParse(t *testing.T) {
 			t.Errorf("Skipping test %v, got error trying to load expected file(%v): %v", name, expectedName, err)
 			continue
 		}
-		tree, err := Parse(string(sql))
+		tree, _, err := Parse(string(sql))
 		if err != nil {
 			t.Errorf("Failed test %v: Got error: %v", t.Name(), err)
 		}
@@ -86,7 +88,7 @@ func TestFullFileFailParse(t *testing.T) {
 				continue
 			}
 		*/
-		tree, err := Parse(string(sql))
+		tree, _, err := Parse(string(sql))
 		if err == nil {
 			out := String(tree)
 			t.Errorf("Failed test %v , expected error Got(%v)\n%v", name, len(out), out)
@@ -98,7 +100,7 @@ func TestFullFileFailParse(t *testing.T) {
 func BenchmarkParse1(b *testing.B) {
 	sql := "select 'abcd', 20, 30.0, eid from a where 1=eid and name='3'"
 	for i := 0; i < b.N; i++ {
-		_, err := Parse(sql)
+		_, _, err := Parse(sql)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -108,7 +110,7 @@ func BenchmarkParse1(b *testing.B) {
 func BenchmarkParse2(b *testing.B) {
 	sql := "select aaaa, bbb, ccc, ddd, eeee, ffff, gggg, hhhh, iiii from tttt, ttt1, ttt3 where aaaa = bbbb and bbbb = cccc and dddd+1 = eeee group by fff, gggg having hhhh = iiii and iiii = jjjj order by kkkk, llll limit 3, 4"
 	for i := 0; i < b.N; i++ {
-		_, err := Parse(sql)
+		_, _, err := Parse(sql)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -158,6 +160,23 @@ func iterateFiles(pattern string) (testCaseIterator chan testCase) {
 		}
 	}()
 	return testCaseIterator
+}
+
+func TestParseVarSQL(t *testing.T) {
+	filename := "testdata/sql_with_var.sql"
+	fileContent, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to read %s with error: %v", filename, err)
+	}
+	statement, commentEntries, err := Parse(string(fileContent))
+	if err != nil {
+		t.Errorf("Failed to parse %s, with error: %v", filename, err)
+	}
+	_ = statement
+	_ = commentEntries
+	//spew.Dump(commentEntries)
+	spew.Dump(statement)
+
 }
 
 func glob(pattern string) []string {

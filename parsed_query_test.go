@@ -174,7 +174,7 @@ func TestParsedQuery(t *testing.T) {
 	}
 
 	for _, tcase := range tcases {
-		tree, err := Parse(tcase.query)
+		tree, _, err := Parse(tcase.query)
 		if err != nil {
 			t.Errorf("parse failed for %s: %v", tcase.desc, err)
 			continue

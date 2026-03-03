@@ -33,11 +33,17 @@ func (te *TokenizerError) Error() string {
 	return fmt.Sprintf("%s at position %v", te.Err, te.Position)
 }
 
+type CommentEntry struct {
+	Position int
+	Comment  []byte
+}
+
 // Tokenizer is the struct used to generate SQL
 // tokens for the parser.
 type Tokenizer struct {
 	InStream      *strings.Reader
 	AllowComments bool
+	CommentsTable []CommentEntry
 	ForceEOF      bool
 	lastChar      uint16
 	Position      int
@@ -129,13 +135,22 @@ var keywords = map[string]int{
 // Lex returns the next token form the Tokenizer.
 // This function is used by go yacc.
 func (tkn *Tokenizer) Lex(lval *yySymType) int {
+	startPos := tkn.Position
 	typ, val := tkn.Scan()
 	for typ == COMMENT {
+		// Let's add this comment to our comment table so that we can
+		// aline the comment afterwords
+		tkn.CommentsTable = append(tkn.CommentsTable, CommentEntry{
+			Position: startPos,
+			Comment:  val,
+		})
 		if tkn.AllowComments {
 			break
 		}
+		startPos = tkn.Position
 		typ, val = tkn.Scan()
 	}
+	lval.position = startPos
 	switch typ {
 	case ID, STRING, NUMBER, VALUE_ARG, LIST_ARG, COMMENT:
 		lval.bytes = val
@@ -176,7 +191,7 @@ func (tkn *Tokenizer) Scan() (int, []byte) {
 		switch ch {
 		case EOFCHAR:
 			return 0, nil
-		case '=', ',', ';', '(', ')', '+', '*', '%', '&', '|', '^', '~':
+		case '=', ',', ';', '(', ')', '+', '*', '%', '&', '|', '^', '~', '$':
 			return int(ch), nil
 		case '?':
 			tkn.posVarIndex++

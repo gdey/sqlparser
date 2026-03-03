@@ -222,8 +222,19 @@ type SelectStatement interface {
 func (*Select) ISelectStatement() {}
 func (*Union) ISelectStatement()  {}
 
+// WithCTE represents one common table expression: name AS (SELECT ...).
+type WithCTE struct {
+	Name   []byte
+	Select SelectStatement
+}
+
+func (node *WithCTE) Format(buf *TrackedBuffer) {
+	buf.Myprintf("%s as (%v)", node.Name, node.Select)
+}
+
 // Select represents a SELECT statement.
 type Select struct {
+	With         []*WithCTE // optional WITH clause (CTEs)
 	Comments     Comments
 	Distinct     string
 	SelectExprs  SelectExprs
@@ -249,6 +260,13 @@ const (
 )
 
 func (node *Select) Format(buf *TrackedBuffer) {
+	if len(node.With) > 0 {
+		buf.Myprintf("with %v", node.With[0])
+		for i := 1; i < len(node.With); i++ {
+			buf.Myprintf(", %v", node.With[i])
+		}
+		buf.Myprintf(" ")
+	}
 	if len(node.From) == 0 {
 		buf.Myprintf("select %v%s%v", node.Comments, node.Distinct, node.SelectExprs)
 		return
@@ -520,6 +538,17 @@ type SimpleTableExpr interface {
 
 func (*TableName) ISimpleTableExpr() {}
 func (*Subquery) ISimpleTableExpr()  {}
+func (*TableFunc) ISimpleTableExpr() {}
+
+// TableFunc represents a table-valued function call in FROM (e.g. json_each(...)).
+type TableFunc struct {
+	Name  []byte
+	Exprs SelectExprs
+}
+
+func (node *TableFunc) Format(buf *TrackedBuffer) {
+	buf.Myprintf("%s(%v)", node.Name, node.Exprs)
+}
 
 // TableName represents a table  name.
 type TableName struct {
@@ -900,24 +929,24 @@ func (node ListArg) Format(buf *TrackedBuffer) {
 
 // BinaryExpr represents a binary value expression.
 type BinaryExpr struct {
-	Operator    byte
+	Operator string // e.g. "+", "-", "||", "&"
 	Left, Right Expr
 }
 
-// BinaryExpr.Operator
+// BinaryExpr.Operator (single-byte constants for use in parser)
 const (
-	AST_BITAND = '&'
-	AST_BITOR  = '|'
-	AST_BITXOR = '^'
-	AST_PLUS   = '+'
-	AST_MINUS  = '-'
-	AST_MULT   = '*'
-	AST_DIV    = '/'
-	AST_MOD    = '%'
+	AST_BITAND = "&"
+	AST_BITOR  = "|"
+	AST_BITXOR = "^"
+	AST_PLUS   = "+"
+	AST_MINUS  = "-"
+	AST_MULT   = "*"
+	AST_DIV    = "/"
+	AST_MOD    = "%"
 )
 
 func (node *BinaryExpr) Format(buf *TrackedBuffer) {
-	buf.Myprintf("%v%c%v", node.Left, node.Operator, node.Right)
+	buf.Myprintf("%v%s%v", node.Left, node.Operator, node.Right)
 }
 
 // UnaryExpr represents a unary value expression.

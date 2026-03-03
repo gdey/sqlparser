@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 
 	"github.com/gdey/sqlparser"
 )
@@ -66,6 +67,50 @@ func FindTablesFromSources(sql string, sourceSet map[string]struct{}) ([]string,
 		if ctas, ok := ps.Statement.(*sqlparser.CreateTableAsSelect); ok {
 			if sqlparser.SelectStatementReferencesAny(ctas.Select, sourceSet) {
 				out = append(out, string(ctas.Table))
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// FindTablesFromSourcesMulti parses a multi-statement SQL script (by splitting on ";\n")
+// and returns table names that are created using data from any of the given source tables.
+// Use this for scripts that contain BEGIN/COMMIT or multiple statements.
+func FindTablesFromSourcesMulti(sql string, sourceSet map[string]struct{}) ([]string, error) {
+	sql = strings.ReplaceAll(sql, "\r\n", "\n")
+	segments := strings.Split(sql, ";\n")
+	seen := make(map[string]struct{})
+	var out []string
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg == "" || seg == "BEGIN" || seg == "COMMIT" {
+			continue
+		}
+		tree, _, err := sqlparser.Parse(seg)
+		if err != nil {
+			prefix := seg
+			if len(prefix) > 60 {
+				prefix = prefix[:60] + "..."
+			}
+			return nil, fmt.Errorf("parse segment %q: %w", prefix, err)
+		}
+		posStmts, ok := tree.(sqlparser.PositionedStatements)
+		if !ok || len(posStmts) == 0 {
+			continue
+		}
+		for _, ps := range posStmts {
+			if ps.Statement == nil {
+				continue
+			}
+			if ctas, ok := ps.Statement.(*sqlparser.CreateTableAsSelect); ok {
+				if sqlparser.SelectStatementReferencesAny(ctas.Select, sourceSet) {
+					name := string(ctas.Table)
+					if _, ok := seen[name]; !ok {
+						seen[name] = struct{}{}
+						out = append(out, name)
+					}
+				}
 			}
 		}
 	}

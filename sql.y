@@ -77,6 +77,8 @@ var (
   updateExpr  *UpdateExpr
   position    int
   positionedStatements PositionedStatements
+  withCTE     *WithCTE
+  withList    []*WithCTE
 }
 
 
@@ -95,10 +97,13 @@ var (
 %left <empty> AND
 %right <empty> NOT
 %left <empty> '&' '|' '^'
+%left <empty> CONCAT
+%left <empty> JSON_EXTRACT JSON_EXTRACT_TEXT
 %left <empty> '+' '-'
 %left <empty> '*' '/' '%'
 %nonassoc <empty> '.'
 %left <empty> UNARY
+%token <empty> CAST
 %right <empty> CASE, WHEN, THEN, ELSE
 %left <empty> END
 
@@ -106,6 +111,8 @@ var (
 %token <empty> CREATE ALTER DROP RENAME ANALYZE
 %token <empty> TABLE INDEX VIEW TO IGNORE IF UNIQUE USING
 %token <empty> ADD COLUMN
+%token <empty> BEGIN COMMIT
+%token <empty> WITH
 %token <empty> SHOW DESCRIBE EXPLAIN
 
 %start any_command
@@ -161,6 +168,8 @@ var (
 %type <empty> index_column_list_opt
 %type <bytes> sql_id
 %type <empty> force_eof
+%type <withCTE> with_elem
+%type <withList> with_list
 
 %%
 
@@ -205,7 +214,12 @@ command:
 | other_statement
 
 select_statement:
-  SELECT comment_opt distinct_opt select_expression_list FROM comment_opt table_expression_list where_expression_opt group_by_opt having_opt order_by_opt limit_opt lock_opt
+  WITH with_list select_statement
+  {
+    if s, ok := $3.(*Select); ok { s.With = $2 }
+    $$ = $3
+  }
+| SELECT comment_opt distinct_opt select_expression_list FROM comment_opt table_expression_list where_expression_opt group_by_opt having_opt order_by_opt limit_opt lock_opt
   {
     $$ = &Select{Comments: Comments($2), Distinct: $3, SelectExprs: $4, From: $7, FromComments: Comments($6), Where: NewWhere(AST_WHERE, $8), GroupBy: GroupBy($9), Having: NewWhere(AST_HAVING, $10), OrderBy: $11, Limit: $12, Lock: $13}
   }
@@ -216,6 +230,22 @@ select_statement:
 | select_statement union_op select_statement %prec UNION
   {
     $$ = &Union{Type: $2, Left: $1, Right: $3}
+  }
+
+with_list:
+  with_elem
+  {
+    $$ = []*WithCTE{$1}
+  }
+| with_list ',' with_elem
+  {
+    $$ = append($1, $3)
+  }
+
+with_elem:
+  ID AS '(' select_statement ')'
+  {
+    $$ = &WithCTE{Name: $1, Select: $4}
   }
 
 insert_statement:
@@ -314,7 +344,15 @@ analyze_statement:
   }
 
 other_statement:
-  SHOW force_eof
+  BEGIN force_eof
+  {
+    $$ = &Other{}
+  }
+| COMMIT force_eof
+  {
+    $$ = &Other{}
+  }
+| SHOW force_eof
   {
     $$ = &Other{}
   }
@@ -515,6 +553,10 @@ ID
 | ID '.' ID
   {
     $$ = &TableName{Qualifier: $1, Name: $3}
+  }
+| ID '(' select_expression_list ')'
+  {
+    $$ = &TableFunc{Name: $1, Exprs: $3}
   }
 | subquery
   {
@@ -717,6 +759,18 @@ value_expression:
   {
     $$ = &BinaryExpr{Left: $1, Operator: AST_BITXOR, Right: $3}
   }
+| value_expression CONCAT value_expression
+  {
+    $$ = &BinaryExpr{Left: $1, Operator: "||", Right: $3}
+  }
+| value_expression JSON_EXTRACT value_expression
+  {
+    $$ = &BinaryExpr{Left: $1, Operator: "->", Right: $3}
+  }
+| value_expression JSON_EXTRACT_TEXT value_expression
+  {
+    $$ = &BinaryExpr{Left: $1, Operator: "->>", Right: $3}
+  }
 | value_expression '+' value_expression
   {
     $$ = &BinaryExpr{Left: $1, Operator: AST_PLUS, Right: $3}
@@ -767,6 +821,10 @@ value_expression:
 | keyword_as_func '(' select_expression_list ')'
   {
     $$ = &FuncExpr{Name: $1, Exprs: $3}
+  }
+| CAST '(' value_expression AS ID ')'
+  {
+    $$ = &FuncExpr{Name: []byte("cast"), Exprs: SelectExprs{&NonStarExpr{Expr: $3}}}
   }
 | case_expression
   {
@@ -850,6 +908,10 @@ column_name:
 | ID '.' sql_id
   {
     $$ = &ColName{Qualifier: $1, Name: $3}
+  }
+| ID '.' KEY
+  {
+    $$ = &ColName{Qualifier: $1, Name: []byte("key")}
   }
 
 value:

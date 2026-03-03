@@ -150,12 +150,19 @@ func tableNamesFromSimpleTableExpr(expr SimpleTableExpr, out map[string]struct{}
 		out[string(s.Name)] = struct{}{}
 	case *Subquery:
 		tableNamesFromSelectStatement(s.Select, out)
+	case *TableFunc:
+		// table-valued function, no table name to add
 	}
 }
 
 func tableNamesFromSelectStatement(sel SelectStatement, out map[string]struct{}) {
 	switch s := sel.(type) {
 	case *Select:
+		if s.With != nil {
+			for _, cte := range s.With {
+				tableNamesFromSelectStatement(cte.Select, out)
+			}
+		}
 		if s.From != nil {
 			for _, e := range s.From {
 				tableNamesFromTableExpr(e, out)

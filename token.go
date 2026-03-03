@@ -69,6 +69,8 @@ func NewStringTokenizer(sql string) *Tokenizer {
 var statementStartTokens = map[int]bool{
 	SELECT: true, INSERT: true, UPDATE: true, DELETE: true, SET: true,
 	CREATE: true, ALTER: true, RENAME: true, DROP: true, ANALYZE: true,
+	BEGIN: true, COMMIT: true,
+	WITH: true,
 	SHOW: true, DESCRIBE: true, EXPLAIN: true,
 }
 
@@ -90,6 +92,9 @@ var keywords = map[string]int{
 	"alter":        ALTER,
 	"analyze":      ANALYZE,
 	"and":          AND,
+	"begin":        BEGIN,
+	"commit":       COMMIT,
+	"cast":         CAST,
 	"column":       COLUMN,
 	"as":            AS,
 	"asc":           ASC,
@@ -157,6 +162,7 @@ var keywords = map[string]int{
 	"view":          VIEW,
 	"when":          WHEN,
 	"where":         WHERE,
+	"with":          WITH,
 }
 
 // Lex returns the next token form the Tokenizer.
@@ -225,7 +231,13 @@ func (tkn *Tokenizer) Scan() (int, []byte) {
 		switch ch {
 		case EOFCHAR:
 			return 0, nil
-		case '=', ',', ';', '(', ')', '+', '*', '%', '&', '|', '^', '~', '$':
+		case '=', ',', ';', '(', ')', '+', '*', '%', '&', '^', '~', '$':
+			return int(ch), nil
+		case '|':
+			if tkn.lastChar == '|' {
+				tkn.next()
+				return CONCAT, nil
+			}
 			return int(ch), nil
 		case '?':
 			tkn.posVarIndex++
@@ -253,9 +265,16 @@ func (tkn *Tokenizer) Scan() (int, []byte) {
 			if tkn.lastChar == '-' {
 				tkn.next()
 				return tkn.scanCommentType1("--")
-			} else {
-				return int(ch), nil
 			}
+			if tkn.lastChar == '>' {
+				tkn.next()
+				if tkn.lastChar == '>' {
+					tkn.next()
+					return JSON_EXTRACT_TEXT, nil
+				}
+				return JSON_EXTRACT, nil
+			}
+			return int(ch), nil
 		case '#':
 			return tkn.scanCommentType1("#")
 		case '<':

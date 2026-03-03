@@ -1,6 +1,6 @@
 module github.com/gdey/sqlparser
 
-go 1.24.2
+go 1.26.0
 
 require (
 	github.com/davecgh/go-spew v1.1.1

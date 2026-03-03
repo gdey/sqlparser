@@ -36,7 +36,7 @@ CREATE TABLE addresses AS
 	FROM
 		parcels_data AS data
 	LEFT JOIN
-		parcels_csv AS csv ON data.ain = csv.ain
+		parcels_csv AS csv USING(ain)
 	WHERE
 		data.ain IS NOT NULL
 	GROUP BY

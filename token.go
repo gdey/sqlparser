@@ -86,9 +86,11 @@ func (tkn *Tokenizer) GetAndPopStatementStart() int {
 
 var keywords = map[string]int{
 	"all":           ALL,
-	"alter":         ALTER,
-	"analyze":       ANALYZE,
-	"and":           AND,
+	"add":          ADD,
+	"alter":        ALTER,
+	"analyze":      ANALYZE,
+	"and":          AND,
+	"column":       COLUMN,
 	"as":            AS,
 	"asc":           ASC,
 	"between":       BETWEEN,

@@ -105,6 +105,7 @@ var (
 // DDL Tokens
 %token <empty> CREATE ALTER DROP RENAME ANALYZE
 %token <empty> TABLE INDEX VIEW TO IGNORE IF UNIQUE USING
+%token <empty> ADD COLUMN
 %token <empty> SHOW DESCRIBE EXPLAIN
 
 %start any_command
@@ -157,6 +158,7 @@ var (
 %type <updateExprs> update_list
 %type <updateExpr> update_expression
 %type <empty> exists_opt not_exists_opt ignore_opt non_rename_operation to_opt constraint_opt using_opt
+%type <empty> index_column_list_opt
 %type <bytes> sql_id
 %type <empty> force_eof
 
@@ -259,7 +261,7 @@ create_statement:
   {
     $$ = &CreateTableAsSelect{Table: $4, Select: $6}
   }
-| CREATE constraint_opt INDEX sql_id using_opt ON ID force_eof
+| CREATE constraint_opt INDEX sql_id using_opt ON ID index_column_list_opt force_eof
   {
     // Change this to an alter statement
     $$ = &DDL{Action: AST_ALTER, Table: $7, NewName: $7}
@@ -448,6 +450,10 @@ table_expression:
 | table_expression join_type table_expression ON boolean_expression %prec JOIN
   {
     $$ = &JoinTableExpr{LeftExpr: $1, Join: $2, RightExpr: $3, On: $5}
+  }
+| table_expression join_type table_expression USING '(' column_list ')' %prec JOIN
+  {
+    $$ = &JoinTableExpr{LeftExpr: $1, Join: $2, RightExpr: $3, Using: $6}
   }
 
 as_opt:
@@ -1051,6 +1057,10 @@ non_rename_operation:
   { $$ = struct{}{} }
 | ORDER
   { $$ = struct{}{} }
+| ADD COLUMN ID ID
+  { $$ = struct{}{} }
+| ADD ID
+  { $$ = struct{}{} }
 | ID
   { $$ = struct{}{} }
 
@@ -1067,6 +1077,11 @@ constraint_opt:
 using_opt:
   { $$ = struct{}{} }
 | USING sql_id
+  { $$ = struct{}{} }
+
+index_column_list_opt:
+  { $$ = struct{}{} }
+| '(' column_list ')'
   { $$ = struct{}{} }
 
 sql_id:

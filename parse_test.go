@@ -188,6 +188,64 @@ func TestCreateTableAsSelect(t *testing.T) {
 	}
 }
 
+// parseMultiStatements splits sql by ";\n" and parses each segment so that
+// multi-statement input can be parsed (the grammar uses force_eof so a single
+// Parse() only returns one statement).
+func parseMultiStatements(sql string) (PositionedStatements, error) {
+	// Normalize and split on statement boundary (semicolon then newline).
+	sql = strings.ReplaceAll(sql, "\r\n", "\n")
+	parts := strings.Split(sql, ";\n")
+	var out PositionedStatements
+	pos := 0
+	for _, seg := range parts {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		stmt, _, err := Parse(seg)
+		if err != nil {
+			return nil, fmt.Errorf("parse segment at pos %d: %w", pos, err)
+		}
+		ps, ok := stmt.(PositionedStatements)
+		if !ok || len(ps) != 1 {
+			return nil, fmt.Errorf("expected single PositionedStatement at pos %d", pos)
+		}
+		ps[0].Start = pos
+		pos += len(seg) + 2 // +2 for ";\n"
+		ps[0].End = pos
+		out = append(out, ps[0])
+	}
+	return out, nil
+}
+
+func TestParseLACountyAddressesTransform(t *testing.T) {
+	sql, err := os.ReadFile("testdata/la_county_addresses_transform.sql")
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	pos, err := parseMultiStatements(string(sql))
+	if err != nil {
+		t.Fatalf("parse LA County addresses transform SQL: %v", err)
+	}
+	// Should have multiple statements including at least one CreateTableAsSelect (addresses).
+	var foundCTAS bool
+	for _, ps := range pos {
+		if _, ok := ps.Statement.(*CreateTableAsSelect); ok {
+			foundCTAS = true
+			break
+		}
+	}
+	if !foundCTAS {
+		types := make([]string, 0, len(pos))
+		for _, ps := range pos {
+			if ps.Statement != nil {
+				types = append(types, fmt.Sprintf("%T", ps.Statement))
+			}
+		}
+		t.Errorf("expected at least one CreateTableAsSelect (CREATE TABLE addresses AS SELECT ...); got %d statements: %v", len(pos), types)
+	}
+}
+
 func TestParseVarSQL(t *testing.T) {
 	filename := "testdata/sql_with_var.sql"
 	fileContent, err := os.ReadFile(filename)

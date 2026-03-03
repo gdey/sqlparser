@@ -549,6 +549,7 @@ type JoinTableExpr struct {
 	Join      string
 	RightExpr TableExpr
 	On        BoolExpr
+	Using     Columns // optional USING (col1, col2)
 }
 
 // JoinTableExpr.Join
@@ -565,6 +566,9 @@ func (node *JoinTableExpr) Format(buf *TrackedBuffer) {
 	buf.Myprintf("%v %s %v", node.LeftExpr, node.Join, node.RightExpr)
 	if node.On != nil {
 		buf.Myprintf(" on %v", node.On)
+	}
+	if len(node.Using) > 0 {
+		buf.Myprintf(" using (%v)", node.Using)
 	}
 }
 

@@ -7,6 +7,7 @@ package sqlparser
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"sort"
 	"strconv"
@@ -27,27 +28,37 @@ import (
 // a set of types, define the function as ITypeName.
 // This will help avoid name collisions.
 
-// Parse parses the sql and returns a Statement, which
-// is the AST representation of the query.
-func Parse(sql string) (Statement, []CommentEntry, error) {
+// Parse parses the sql and returns the list of statements (with positions).
+// A single-statement input returns a one-element list.
+func Parse(sql string) (PositionedStatements, []CommentEntry, error) {
 	tokenizer := NewStringTokenizer(sql)
 	if yyParse(tokenizer) != 0 {
 		return nil, nil, tokenizer.LastError
 	}
-	return tokenizer.ParseTree, tokenizer.CommentsTable, nil
+	return tokenizer.ParseTree.(PositionedStatements), tokenizer.CommentsTable, nil
 }
 
-// ParseFile parses a sql file, and returns the statments contained in the file.
-func ParseFile(fn string) (Statement, []CommentEntry, error) {
-	buff, err := os.ReadFile(fn)
+// ParseFile parses a sql file and returns the statements contained in the file.
+// If fsys is nil, the file is read from the OS (using os.ReadFile).
+// If fsys is non-nil, the file is read via fs.ReadFile, which uses the FS's
+// ReadFile method when it implements fs.ReadFileFS, otherwise Open and io.ReadAll.
+func ParseFile(fsys fs.FS, fn string) (PositionedStatements, []CommentEntry, error) {
+	var data []byte
+	var err error
+	if fsys == nil {
+		data, err = os.ReadFile(fn)
+	} else {
+		data, err = fs.ReadFile(fsys, fn)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
-	return Parse(string(buff))
+	return Parse(string(data))
 }
 
-// ParseReader takes an io.Reader and returns the statement. This is not a streaming parser, so it will read everything into memory before trying to parse it.
-func ParseReader(r io.Reader) (Statement, []CommentEntry, error) {
+// ParseReader parses sql from an io.Reader. It is not a streaming parser; the
+// reader is read fully into memory before parsing.
+func ParseReader(r io.Reader) (PositionedStatements, []CommentEntry, error) {
 	buff, err := io.ReadAll(r)
 	if err != nil {
 		return nil, nil, err
@@ -55,15 +66,14 @@ func ParseReader(r io.Reader) (Statement, []CommentEntry, error) {
 	return Parse(string(buff))
 }
 
-// FormatWithComments produces SQL by interleaving the formatted tree with comments
-// by source position. Use this when tree is PositionedStatements to preserve
-// comment placement. Comments that fall inside a statement's [Start, End) are
-// omitted (they are assumed to be in the AST and appear in String(statement)).
-func FormatWithComments(tree Statement, comments []CommentEntry) string {
-	posStmts, ok := tree.(PositionedStatements)
-	if !ok {
-		return String(tree)
+// FormatWithComments produces SQL by interleaving the formatted statements with
+// comments by source position. Comments that fall inside a statement's [Start,
+// End) are omitted (they are assumed to be in the AST and appear in String(stmt)).
+func FormatWithComments(stmts PositionedStatements, comments []CommentEntry) string {
+	if len(stmts) == 0 {
+		return ""
 	}
+	posStmts := stmts
 	type event struct {
 		pos       int
 		comment   []byte

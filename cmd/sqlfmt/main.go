@@ -26,21 +26,10 @@ type FormatOptions struct {
 	MaxFieldsInline int
 }
 
-// formatSQL produces "pretty" SQL from the parse tree. When tree is PositionedStatements
-// and comments is non-nil, comments are interleaved by source position.
-func formatSQL(tree sqlparser.Statement, comments []sqlparser.CommentEntry, opts FormatOptions) (string, error) {
-	if posStmts, ok := tree.(sqlparser.PositionedStatements); ok {
-		return formatWithPositionedComments(posStmts, comments, opts)
-	}
-	// Fallback: format tree only (no position-based comment interleaving).
-	formatter := makePrettyFormat(opts)
-	buf := sqlparser.NewTrackedBuffer(formatter)
-	buf.Myprintf("%v", tree)
-	s := buf.String()
-	if s != "" && !strings.HasSuffix(s, ";") && !endsWithCommentOnly(tree) {
-		s += ";"
-	}
-	return s, nil
+// formatSQL produces "pretty" SQL from the parsed statements. Comments are
+// interleaved by source position when non-nil.
+func formatSQL(stmts sqlparser.PositionedStatements, comments []sqlparser.CommentEntry, opts FormatOptions) (string, error) {
+	return formatWithPositionedComments(stmts, comments, opts)
 }
 
 // formatWithPositionedComments merges statements and comments by position and writes formatted SQL.
@@ -84,19 +73,6 @@ func formatWithPositionedComments(stmts sqlparser.PositionedStatements, comments
 		}
 	}
 	return b.String(), nil
-}
-
-// endsWithCommentOnly reports whether the tree is only comments or ends with a Comments statement.
-func endsWithCommentOnly(tree sqlparser.Statement) bool {
-	if _, ok := tree.(sqlparser.Comments); ok {
-		return true
-	}
-	sts, ok := tree.(sqlparser.Statements)
-	if !ok || len(sts) == 0 {
-		return false
-	}
-	_, lastIsComment := sts[len(sts)-1].(sqlparser.Comments)
-	return lastIsComment
 }
 
 // formatWithDefault formats a node using the default (single-line) formatter.
@@ -360,14 +336,14 @@ func main() {
 			panic(err)
 		}
 		buff := string(buf)
-		statement, commentEntries, err := sqlparser.Parse(buff)
+		stmts, commentEntries, err := sqlparser.Parse(buff)
 		if err != nil {
 			tokenError, _ := err.(*sqlparser.TokenizerError)
 			FormatErrorMessage(os.Stderr, tokenError, file, buff, true)
 			statusCode = SytnaxErrorCode
 			continue
 		}
-		formatted, err := formatSQL(statement, commentEntries, opts)
+		formatted, err := formatSQL(stmts, commentEntries, opts)
 		if err != nil {
 			panic(err)
 		}

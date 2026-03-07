@@ -51,13 +51,9 @@ UPDATE addresses SET jurisdiction = 'Example';
 // data from any of the given source tables (e.g. CREATE TABLE ... AS SELECT ...
 // FROM source_tables). sourceSet keys are the source table names.
 func FindTablesFromSources(sql string, sourceSet map[string]struct{}) ([]string, error) {
-	tree, _, err := sqlparser.Parse(sql)
+	posStmts, _, err := sqlparser.Parse(sql)
 	if err != nil {
 		return nil, err
-	}
-	posStmts, ok := tree.(sqlparser.PositionedStatements)
-	if !ok {
-		return nil, fmt.Errorf("expected PositionedStatements")
 	}
 	var out []string
 	for _, ps := range posStmts {
@@ -87,7 +83,7 @@ func FindTablesFromSourcesMulti(sql string, sourceSet map[string]struct{}) ([]st
 		if seg == "" || seg == "BEGIN" || seg == "COMMIT" {
 			continue
 		}
-		tree, _, err := sqlparser.Parse(seg)
+		posStmts, _, err := sqlparser.Parse(seg)
 		if err != nil {
 			prefix := seg
 			if len(prefix) > 60 {
@@ -95,8 +91,7 @@ func FindTablesFromSourcesMulti(sql string, sourceSet map[string]struct{}) ([]st
 			}
 			return nil, fmt.Errorf("parse segment %q: %w", prefix, err)
 		}
-		posStmts, ok := tree.(sqlparser.PositionedStatements)
-		if !ok || len(posStmts) == 0 {
+		if len(posStmts) == 0 {
 			continue
 		}
 		for _, ps := range posStmts {

@@ -179,13 +179,9 @@ func TestCaseWhenBareExpression(t *testing.T) {
 
 func TestCreateTableAsSelect(t *testing.T) {
 	sql := "CREATE TABLE addresses AS SELECT 1 FROM parcels_data"
-	tree, _, err := Parse(sql)
+	pos, _, err := Parse(sql)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
-	}
-	pos, ok := tree.(PositionedStatements)
-	if !ok {
-		t.Fatalf("expected PositionedStatements, got %T", tree)
 	}
 	if len(pos) != 1 {
 		t.Fatalf("expected 1 statement, got %d", len(pos))
@@ -204,10 +200,8 @@ func TestCreateTableAsSelect(t *testing.T) {
 }
 
 // parseMultiStatements splits sql by ";\n" and parses each segment so that
-// multi-statement input can be parsed (the grammar uses force_eof so a single
-// Parse() only returns one statement).
+// multi-statement input can be parsed (each segment yields one statement).
 func parseMultiStatements(sql string) (PositionedStatements, error) {
-	// Normalize and split on statement boundary (semicolon then newline).
 	sql = strings.ReplaceAll(sql, "\r\n", "\n")
 	parts := strings.Split(sql, ";\n")
 	var out PositionedStatements
@@ -217,13 +211,12 @@ func parseMultiStatements(sql string) (PositionedStatements, error) {
 		if seg == "" {
 			continue
 		}
-		stmt, _, err := Parse(seg)
+		ps, _, err := Parse(seg)
 		if err != nil {
 			return nil, fmt.Errorf("parse segment at pos %d: %w", pos, err)
 		}
-		ps, ok := stmt.(PositionedStatements)
-		if !ok || len(ps) != 1 {
-			return nil, fmt.Errorf("expected single PositionedStatement at pos %d", pos)
+		if len(ps) != 1 {
+			return nil, fmt.Errorf("expected single statement at pos %d", pos)
 		}
 		ps[0].Start = pos
 		pos += len(seg) + 2 // +2 for ";\n"
@@ -267,14 +260,14 @@ func TestParseVarSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read %s with error: %v", filename, err)
 	}
-	statement, commentEntries, err := Parse(string(fileContent))
+	stmts, commentEntries, err := Parse(string(fileContent))
 	if err != nil {
 		t.Errorf("Failed to parse %s, with error: %v", filename, err)
 	}
-	_ = statement
+	_ = stmts
 	_ = commentEntries
 	//spew.Dump(commentEntries)
-	spew.Dump(statement)
+	spew.Dump(stmts)
 
 }
 

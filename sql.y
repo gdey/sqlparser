@@ -109,6 +109,7 @@ var (
 
 // DDL Tokens
 %token <empty> CREATE ALTER DROP RENAME ANALYZE
+%token <empty> TEMPORARY TEMP
 %token <empty> TABLE INDEX VIEW TO IGNORE IF UNIQUE USING
 %token <empty> ADD COLUMN
 %token <empty> BEGIN COMMIT
@@ -119,7 +120,7 @@ var (
 
 %type <statement> command
 %type <positionedStatements> commands
-%type <selStmt> select_statement
+%type <selStmt> select_statement opt_paren_select
 %type <statement> insert_statement update_statement delete_statement set_statement
 %type <statement> create_statement alter_statement rename_statement drop_statement
 %type <statement> analyze_statement other_statement
@@ -232,6 +233,12 @@ select_statement:
     $$ = &Union{Type: $2, Left: $1, Right: $3}
   }
 
+opt_paren_select:
+  select_statement
+  { $$ = $1 }
+| '(' select_statement ')'
+  { $$ = $2 }
+
 with_list:
   with_elem
   {
@@ -287,9 +294,25 @@ create_statement:
   {
     $$ = &DDL{Action: AST_CREATE, NewName: $4}
   }
-| CREATE TABLE not_exists_opt ID AS select_statement force_eof
+| CREATE TEMPORARY TABLE not_exists_opt ID force_eof
+  {
+    $$ = &DDL{Action: AST_CREATE, NewName: $5, Temporary: true}
+  }
+| CREATE TEMP TABLE not_exists_opt ID force_eof
+  {
+    $$ = &DDL{Action: AST_CREATE, NewName: $5, Temporary: true}
+  }
+| CREATE TABLE not_exists_opt ID AS opt_paren_select force_eof
   {
     $$ = &CreateTableAsSelect{Table: $4, Select: $6}
+  }
+| CREATE TEMPORARY TABLE not_exists_opt ID AS opt_paren_select force_eof
+  {
+    $$ = &CreateTableAsSelect{Table: $5, Select: $7, Temporary: true}
+  }
+| CREATE TEMP TABLE not_exists_opt ID AS opt_paren_select force_eof
+  {
+    $$ = &CreateTableAsSelect{Table: $5, Select: $7, Temporary: true}
   }
 | CREATE constraint_opt INDEX sql_id using_opt ON ID index_column_list_opt force_eof
   {

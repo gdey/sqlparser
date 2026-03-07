@@ -197,6 +197,117 @@ func TestCreateTableAsSelect(t *testing.T) {
 	if _, ok := refs["parcels_data"]; !ok {
 		t.Errorf("expected parcels_data in FROM refs, got %v", refs)
 	}
+	if ctas.Temporary {
+		t.Error("expected Temporary false for CREATE TABLE")
+	}
+	if ctas.Temp() {
+		t.Error("expected Temp() false for CREATE TABLE")
+	}
+}
+
+func TestCreateTemporaryTableAsSelect(t *testing.T) {
+	sql := "CREATE TEMPORARY TABLE table1 AS SELECT * FROM users"
+	pos, _, err := Parse(sql)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(pos) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(pos))
+	}
+	ctas, ok := pos[0].Statement.(*CreateTableAsSelect)
+	if !ok {
+		t.Fatalf("expected CreateTableAsSelect, got %T", pos[0].Statement)
+	}
+	if string(ctas.Table) != "table1" {
+		t.Errorf("table name: got %q", ctas.Table)
+	}
+	if !ctas.Temporary {
+		t.Error("expected Temporary true for CREATE TEMPORARY TABLE")
+	}
+	if !ctas.Temp() {
+		t.Error("expected Temp() true for CREATE TEMPORARY TABLE")
+	}
+	// Round-trip
+	out := String(pos[0].Statement)
+	if out == "" {
+		t.Error("expected non-empty String()")
+	}
+	if !strings.Contains(strings.ToLower(out), "temporary") {
+		t.Errorf("expected output to contain 'temporary', got %q", out)
+	}
+}
+
+func TestCreateTemporaryTableDDL(t *testing.T) {
+	sql := "CREATE TEMPORARY TABLE t"
+	pos, _, err := Parse(sql)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(pos) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(pos))
+	}
+	ddl, ok := pos[0].Statement.(*DDL)
+	if !ok {
+		t.Fatalf("expected DDL, got %T", pos[0].Statement)
+	}
+	if ddl.Action != AST_CREATE || string(ddl.NewName) != "t" {
+		t.Errorf("unexpected DDL: Action=%q NewName=%q", ddl.Action, ddl.NewName)
+	}
+	if !ddl.Temporary {
+		t.Error("expected Temporary true for CREATE TEMPORARY TABLE")
+	}
+	if !ddl.Temp() {
+		t.Error("expected Temp() true for CREATE TEMPORARY TABLE")
+	}
+}
+
+func TestCreateTempTable(t *testing.T) {
+	// TEMP is synonym for TEMPORARY
+	for _, sql := range []string{
+		"CREATE TEMP TABLE t",
+		"CREATE TEMP TABLE t AS SELECT 1",
+		"CREATE TEMP TABLE t AS ( SELECT 1 )",
+	} {
+		pos, _, err := Parse(sql)
+		if err != nil {
+			t.Errorf("parse %q: %v", sql, err)
+			continue
+		}
+		if len(pos) != 1 {
+			t.Errorf("parse %q: expected 1 statement", sql)
+			continue
+		}
+		switch stmt := pos[0].Statement.(type) {
+		case *DDL:
+			if !stmt.Temporary && !stmt.Temp() {
+				t.Errorf("parse %q: expected Temporary true", sql)
+			}
+		case *CreateTableAsSelect:
+			if !stmt.Temporary && !stmt.Temp() {
+				t.Errorf("parse %q: expected Temporary true", sql)
+			}
+		default:
+			t.Errorf("parse %q: unexpected type %T", sql, stmt)
+		}
+	}
+}
+
+func TestCreateTableAsSelectWithParens(t *testing.T) {
+	sql := "CREATE TABLE t AS ( SELECT * FROM users )"
+	pos, _, err := Parse(sql)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(pos) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(pos))
+	}
+	ctas, ok := pos[0].Statement.(*CreateTableAsSelect)
+	if !ok {
+		t.Fatalf("expected CreateTableAsSelect, got %T", pos[0].Statement)
+	}
+	if string(ctas.Table) != "t" {
+		t.Errorf("table name: got %q", ctas.Table)
+	}
 }
 
 // parseMultiStatements splits sql by ";\n" and parses each segment so that

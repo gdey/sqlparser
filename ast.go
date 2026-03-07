@@ -373,24 +373,37 @@ func (node *Set) Format(buf *TrackedBuffer) {
 	buf.Myprintf("set %v%v", node.Comments, node.Exprs)
 }
 
-// CreateTableAsSelect represents CREATE TABLE ... AS SELECT.
+// CreateTableAsSelect represents CREATE [TEMPORARY|TEMP] TABLE ... AS [ ( ] SELECT [ ) ].
 type CreateTableAsSelect struct {
-	Table  []byte
-	Select SelectStatement
+	Table     []byte
+	Select    SelectStatement
+	Temporary bool // true for CREATE TEMPORARY/TEMP TABLE
 }
 
+// Temp returns node.Temporary for convenience; both Temporary and Temp() can be used.
+func (node *CreateTableAsSelect) Temp() bool { return node.Temporary }
+
 func (node *CreateTableAsSelect) Format(buf *TrackedBuffer) {
-	buf.Myprintf("create table %s as %v", node.Table, node.Select)
+	if node.Temporary {
+		buf.Myprintf("create temporary table %s as %v", node.Table, node.Select)
+	} else {
+		buf.Myprintf("create table %s as %v", node.Table, node.Select)
+	}
 }
 
 // DDL represents a CREATE, ALTER, DROP or RENAME statement.
 // Table is set for AST_ALTER, AST_DROP, AST_RENAME.
 // NewName is set for AST_ALTER, AST_CREATE, AST_RENAME.
+// Temporary is true for CREATE TEMPORARY/TEMP TABLE.
 type DDL struct {
-	Action  string
-	Table   []byte
-	NewName []byte
+	Action    string
+	Table     []byte
+	NewName   []byte
+	Temporary bool
 }
+
+// Temp returns node.Temporary for convenience; both Temporary and Temp() can be used.
+func (node *DDL) Temp() bool { return node.Temporary }
 
 const (
 	AST_CREATE = "create"
@@ -402,7 +415,11 @@ const (
 func (node *DDL) Format(buf *TrackedBuffer) {
 	switch node.Action {
 	case AST_CREATE:
-		buf.Myprintf("%s table %s", node.Action, node.NewName)
+		if node.Temporary {
+			buf.Myprintf("%s temporary table %s", node.Action, node.NewName)
+		} else {
+			buf.Myprintf("%s table %s", node.Action, node.NewName)
+		}
 	case AST_RENAME:
 		buf.Myprintf("%s table %s %s", node.Action, node.Table, node.NewName)
 	default:

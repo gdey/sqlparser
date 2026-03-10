@@ -7,6 +7,7 @@ package sqlparser
 
 import (
   "bytes"
+  "strconv"
 )
 
 func SetParseTree(yylex interface{}, stmt Statement) {
@@ -34,6 +35,7 @@ var (
   MODE  =        []byte("mode")
   IF_BYTES =     []byte("if")
   VALUES_BYTES = []byte("values")
+  PRIMARY_BYTES = []byte("primary")
 )
 
 %}
@@ -79,6 +81,14 @@ var (
   positionedStatements PositionedStatements
   withCTE     *WithCTE
   withList    []*WithCTE
+
+  colType         ColumnType
+  colOpt          ColumnOptions
+  colDef          *ColumnDefinition
+  colDefs         ColumnDefinitions
+  createTableBody *createTableBody
+  tableConstraint *TableConstraint
+  columnNameList  [][]byte
 }
 
 
@@ -110,7 +120,7 @@ var (
 // DDL Tokens
 %token <empty> CREATE ALTER DROP RENAME ANALYZE
 %token <empty> TEMPORARY TEMP
-%token <empty> TABLE INDEX VIEW TO IGNORE IF UNIQUE USING
+%token <empty> TABLE INDEX VIEW TO IGNORE IF UNIQUE USING REFERENCES PRIMARY FOREIGN
 %token <empty> ADD COLUMN
 %token <empty> BEGIN COMMIT
 %token <empty> WITH
@@ -166,6 +176,12 @@ var (
 %type <updateExprs> update_list
 %type <updateExpr> update_expression
 %type <empty> exists_opt not_exists_opt ignore_opt non_rename_operation to_opt constraint_opt using_opt
+%type <colType> column_type
+%type <colOpt> column_option column_options_opt column_options
+%type <colDef> column_def
+%type <createTableBody> table_element_list
+%type <tableConstraint> table_constraint
+%type <columnNameList> column_name_list
 %type <empty> index_column_list_opt
 %type <bytes> sql_id
 %type <empty> force_eof
@@ -302,6 +318,18 @@ create_statement:
   {
     $$ = &DDL{Action: AST_CREATE, NewName: $5, Temporary: true}
   }
+| CREATE TABLE not_exists_opt ID '(' table_element_list ')' force_eof
+  {
+    $$ = &CreateTable{Table: $4, Columns: $6.Columns, Constraints: $6.Constraints}
+  }
+| CREATE TEMPORARY TABLE not_exists_opt ID '(' table_element_list ')' force_eof
+  {
+    $$ = &CreateTable{Table: $5, Columns: $7.Columns, Constraints: $7.Constraints, Temporary: true}
+  }
+| CREATE TEMP TABLE not_exists_opt ID '(' table_element_list ')' force_eof
+  {
+    $$ = &CreateTable{Table: $5, Columns: $7.Columns, Constraints: $7.Constraints, Temporary: true}
+  }
 | CREATE TABLE not_exists_opt ID AS opt_paren_select force_eof
   {
     $$ = &CreateTableAsSelect{Table: $4, Select: $6}
@@ -323,6 +351,122 @@ create_statement:
   {
     $$ = &DDL{Action: AST_CREATE, NewName: $3}
   }
+
+table_element_list:
+  column_def
+  {
+    $$ = &createTableBody{Columns: ColumnDefinitions{$1}, Constraints: nil}
+  }
+| table_element_list ',' column_def
+  {
+    $$ = &createTableBody{Columns: append($1.Columns, $3), Constraints: $1.Constraints}
+  }
+| table_element_list ',' table_constraint
+  {
+    $$ = &createTableBody{Columns: $1.Columns, Constraints: append($1.Constraints, $3)}
+  }
+;
+
+column_def:
+  ID column_type column_options_opt
+  {
+    $$ = &ColumnDefinition{Name: $1, Type: $2, Options: $3}
+  }
+;
+
+column_type:
+  ID
+  {
+    $$ = ColumnType{Name: $1}
+  }
+| ID '(' NUMBER ')'
+  {
+    n, _ := strconv.Atoi(string($3))
+    $$ = ColumnType{Name: $1, Length: &n}
+  }
+| ID '(' NUMBER ',' NUMBER ')'
+  {
+    prec, _ := strconv.Atoi(string($3))
+    scale, _ := strconv.Atoi(string($5))
+    $$ = ColumnType{Name: $1, Length: &prec, Scale: &scale}
+  }
+;
+
+column_options_opt:
+  {
+    $$ = ColumnOptions{}
+  }
+| column_options
+  {
+    $$ = $1
+  }
+;
+
+column_options:
+  column_option
+  {
+    $$ = $1
+  }
+| column_options column_option
+  {
+    $$ = $1
+    if $2.NotNull {
+      $$.NotNull = true
+    }
+    if $2.PrimaryKey {
+      $$.PrimaryKey = true
+    }
+  }
+;
+
+column_option:
+  NOT NULL
+  {
+    $$ = ColumnOptions{NotNull: true}
+  }
+| NULL
+  {
+    $$ = ColumnOptions{}
+  }
+| PRIMARY KEY
+  {
+    $$ = ColumnOptions{PrimaryKey: true}
+  }
+| ID KEY
+  {
+    if bytes.Equal($1, PRIMARY_BYTES) {
+      $$ = ColumnOptions{PrimaryKey: true}
+    } else {
+      $$ = ColumnOptions{}
+    }
+  }
+;
+
+column_name_list:
+  ID
+  {
+    $$ = [][]byte{$1}
+  }
+| column_name_list ',' ID
+  {
+    $$ = append($1, $3)
+  }
+;
+
+table_constraint:
+  PRIMARY KEY '(' column_name_list ')'
+  {
+    $$ = &TableConstraint{Kind: "primary key", Columns: $4}
+  }
+| UNIQUE '(' column_name_list ')'
+  {
+    $$ = &TableConstraint{Kind: "unique", Columns: $3}
+  }
+| FOREIGN KEY '(' column_name_list ')' REFERENCES ID '(' column_name_list ')'
+  {
+    $$ = &TableConstraint{Kind: "foreign key", Columns: $4, RefTable: $7, RefColumns: $9}
+  }
+;
 
 alter_statement:
   ALTER ignore_opt TABLE ID non_rename_operation force_eof

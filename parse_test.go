@@ -45,7 +45,9 @@ func TestParse(t *testing.T) {
 					return
 				}
 				if !errors.Is(tc.Err, errExpectParseFailure) && err.Error() != tc.Err.Error() {
-					t.Errorf("error:\n  got:  %q\n  want: %q", err.Error(), tc.Err.Error())
+					t.Errorf("error:\n  got:  %s\n  want: %q", err.Error(), tc.Err.Error())
+				} else {
+					t.Logf("parse error (expected): %s", err.Error())
 				}
 				return
 			}
@@ -140,6 +142,13 @@ func TestParse(t *testing.T) {
 		"fail/bind_dbl1":       {SQL: "select * from t where ::1 = 2", Err: errExpectParseFailure},
 		"fail/bind_dbl_dot":    {SQL: "select * from t where ::. = 2", Err: errExpectParseFailure},
 		"fail/unclosed_cmt":    {SQL: "select /* aa", Err: errExpectParseFailure},
+		"pass/create_table_columns": {SQL: `CREATE TABLE a_table (
+    id integer primary key
+  , name text not null
+);`},
+		"pass/create_table_varchar":  {SQL: "create table t (name varchar(255))"},
+		"pass/create_table_decimal":  {SQL: "create table t (amount decimal(10, 2))"},
+		"pass/create_table_constraints": {SQL: "create table t (a int, b int, primary key (a, b), unique (a))"},
 
 		// pass/case_sensitivity (from testdata/TestParse/pass/case_sensitivity.sql)
 		"pass/case_sensitivity/1": {SQL: "create table A"},
@@ -460,6 +469,140 @@ func TestCreateTableAsSelect(t *testing.T) {
 	}
 	if ctas.Temp() {
 		t.Error("expected Temp() false for CREATE TABLE")
+	}
+}
+
+func TestCreateTableWithColumns(t *testing.T) {
+	sql := `CREATE TABLE a_table (
+    id integer primary key
+  , name text not null
+);`
+	pos, _, err := Parse(sql)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(pos) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(pos))
+	}
+	ct, ok := pos[0].Statement.(*CreateTable)
+	if !ok {
+		t.Fatalf("expected CreateTable, got %T", pos[0].Statement)
+	}
+	if string(ct.Table) != "a_table" {
+		t.Errorf("table name: got %q", ct.Table)
+	}
+	if ct.Temporary || ct.Temp() {
+		t.Error("expected Temporary false for CREATE TABLE")
+	}
+	if len(ct.Columns) != 2 {
+		t.Fatalf("expected 2 columns, got %d", len(ct.Columns))
+	}
+	if string(ct.Columns[0].Name) != "id" || string(ct.Columns[0].Type.Name) != "integer" || !ct.Columns[0].Options.PrimaryKey {
+		t.Errorf("unexpected col0: %#v", ct.Columns[0])
+	}
+	if string(ct.Columns[1].Name) != "name" || string(ct.Columns[1].Type.Name) != "text" || !ct.Columns[1].Options.NotNull {
+		t.Errorf("unexpected col1: %#v", ct.Columns[1])
+	}
+	// Round-trip (String is canonicalized to one line).
+	out := String(pos[0].Statement)
+	if !strings.HasPrefix(out, "create table a_table (") {
+		t.Errorf("unexpected output: %q", out)
+	}
+}
+
+func TestCreateTableTypeFormsAndConstraints(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		fn   func(t *testing.T, ct *CreateTable)
+	}{
+		{
+			name: "varchar_length",
+			sql:  "CREATE TABLE t (name varchar(255))",
+			fn: func(t *testing.T, ct *CreateTable) {
+				if len(ct.Columns) != 1 {
+					t.Fatalf("expected 1 column, got %d", len(ct.Columns))
+				}
+				c := ct.Columns[0]
+				if string(c.Type.Name) != "varchar" || c.Type.Length == nil || *c.Type.Length != 255 || c.Type.Scale != nil {
+					t.Errorf("unexpected type: %#v", c.Type)
+				}
+			},
+		},
+		{
+			name: "decimal_precision_scale",
+			sql:  "CREATE TABLE t (amount decimal(10, 2))",
+			fn: func(t *testing.T, ct *CreateTable) {
+				if len(ct.Columns) != 1 {
+					t.Fatalf("expected 1 column, got %d", len(ct.Columns))
+				}
+				c := ct.Columns[0]
+				if string(c.Type.Name) != "decimal" || c.Type.Length == nil || *c.Type.Length != 10 || c.Type.Scale == nil || *c.Type.Scale != 2 {
+					t.Errorf("unexpected type: %#v", c.Type)
+				}
+			},
+		},
+		{
+			name: "table_primary_key",
+			sql:  "CREATE TABLE t (a int, b int, primary key (a, b))",
+			fn: func(t *testing.T, ct *CreateTable) {
+				if len(ct.Constraints) != 1 {
+					t.Fatalf("expected 1 constraint, got %d", len(ct.Constraints))
+				}
+				tc := ct.Constraints[0]
+				if tc.Kind != "primary key" || len(tc.Columns) != 2 || string(tc.Columns[0]) != "a" || string(tc.Columns[1]) != "b" {
+					t.Errorf("unexpected constraint: %#v", tc)
+				}
+			},
+		},
+		{
+			name: "table_unique",
+			sql:  "CREATE TABLE t (email varchar(255), unique (email))",
+			fn: func(t *testing.T, ct *CreateTable) {
+				if len(ct.Constraints) != 1 {
+					t.Fatalf("expected 1 constraint, got %d", len(ct.Constraints))
+				}
+				tc := ct.Constraints[0]
+				if tc.Kind != "unique" || len(tc.Columns) != 1 || string(tc.Columns[0]) != "email" {
+					t.Errorf("unexpected constraint: %#v", tc)
+				}
+			},
+		},
+		{
+			name: "foreign_key",
+			sql:  "CREATE TABLE orders (id int, user_id int, foreign key (user_id) references users (id))",
+			fn: func(t *testing.T, ct *CreateTable) {
+				if len(ct.Constraints) != 1 {
+					t.Fatalf("expected 1 constraint, got %d", len(ct.Constraints))
+				}
+				tc := ct.Constraints[0]
+				if tc.Kind != "foreign key" || len(tc.Columns) != 1 || string(tc.Columns[0]) != "user_id" ||
+					string(tc.RefTable) != "users" || len(tc.RefColumns) != 1 || string(tc.RefColumns[0]) != "id" {
+					t.Errorf("unexpected constraint: %#v", tc)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos, _, err := Parse(tt.sql)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if len(pos) != 1 {
+				t.Fatalf("expected 1 statement, got %d", len(pos))
+			}
+			ct, ok := pos[0].Statement.(*CreateTable)
+			if !ok {
+				t.Fatalf("expected CreateTable, got %T", pos[0].Statement)
+			}
+			tt.fn(t, ct)
+			// Round-trip
+			out := String(ct)
+			if out == "" || !strings.HasPrefix(out, "create table ") {
+				t.Errorf("unexpected format: %q", out)
+			}
+		})
 	}
 }
 
@@ -1203,11 +1346,11 @@ func dumpCreateTableAsSelect(n *CreateTableAsSelect) string {
 func dumpExpectedAST(t *testing.T, name string, sql string) {
 	var out strings.Builder
 	stmts, comments, err := Parse(sql)
-		if err != nil {
-			t.Logf("skip %s: parse failed: %v", name, err)
+	if err != nil {
+		t.Logf("skip %s: parse failed: %v", name, err)
 		return
-		}
-		stmtsGo, commentsGo := dumpExpectedASTGo(stmts, comments)
+	}
+	stmtsGo, commentsGo := dumpExpectedASTGo(stmts, comments)
 	out.WriteString(fmt.Sprintf("\t%q: {\n\t\tSQL: %q,\n\t\tStatements: %s,\n\t\tComments: %s,\n\t},\n\n", name, sql, stmtsGo, commentsGo))
 	t.Logf("\n%s", out.String())
 }

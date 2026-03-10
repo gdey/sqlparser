@@ -16,21 +16,26 @@ import (
 const EOFCHAR = 0x100
 
 // TokenizerError is the struct used to hold the errors if there is any from
-// Parsing.
+// Parsing. Line and Column are 1-based; Position is 0-based byte offset.
+// Error() returns a string like "line N, column M (position P): message" and
+// optionally " near \"token\"" when ErrToken is set.
 type TokenizerError struct {
 	Err      string
 	Position int
+	Line     int // 1-based line number
+	Column   int // 1-based column number
 	ErrToken []byte
 }
 
 func (te *TokenizerError) Error() string {
-	if te == nil { // no error?
+	if te == nil {
 		return ""
 	}
-	if te.ErrToken != nil {
-		return fmt.Sprintf("%s at position %v near %s", te.Err, te.Position, te.ErrToken)
+	msg := fmt.Sprintf("line %d, column %d (position %d): %s", te.Line, te.Column, te.Position, te.Err)
+	if len(te.ErrToken) > 0 {
+		msg += fmt.Sprintf(" near %q", te.ErrToken)
 	}
-	return fmt.Sprintf("%s at position %v", te.Err, te.Position)
+	return msg
 }
 
 type CommentEntry struct {
@@ -42,12 +47,14 @@ type CommentEntry struct {
 // tokens for the parser.
 type Tokenizer struct {
 	InStream                 *strings.Reader
+	Input                    string // original SQL, used to compute line/column for errors
 	AllowComments            bool
 	CommentsTable            []CommentEntry
 	ForceEOF                 bool
 	lastChar                 uint16
 	Position                 int
 	errorToken               []byte
+	lastLexError             string // specific message when Scan returns LEX_ERROR; used by Lex() to set LastError
 	LastError                *TokenizerError
 	posVarIndex              int
 	ParseTree                Statement
@@ -55,11 +62,30 @@ type Tokenizer struct {
 	nextTokenStartsStatement bool  // true after ';' or at start; next SELECT/INSERT/etc. starts a statement
 }
 
+// positionToLineColumn returns 1-based line and column for the given 0-based byte position in input.
+func positionToLineColumn(input string, pos int) (line, col int) {
+	line = 1
+	col = 1
+	if pos > len(input) {
+		pos = len(input)
+	}
+	for i := 0; i < pos; i++ {
+		if input[i] == '\n' {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+	}
+	return line, col
+}
+
 // NewStringTokenizer creates a new Tokenizer for the
 // sql string.
 func NewStringTokenizer(sql string) *Tokenizer {
 	return &Tokenizer{
 		InStream:                 strings.NewReader(sql),
+		Input:                    sql,
 		nextTokenStartsStatement: true,
 	}
 }
@@ -144,8 +170,11 @@ var keywords = map[string]int{
 	"or":            OR,
 	"order":         ORDER,
 	"outer":         OUTER,
-	"rename":        RENAME,
-	"right":         RIGHT,
+	"foreign":     FOREIGN,
+	"primary":      PRIMARY,
+	"references":   REFERENCES,
+	"rename":       RENAME,
+	"right":        RIGHT,
 	"select":        SELECT,
 	"set":           SET,
 	"show":          SHOW,
@@ -186,6 +215,21 @@ func (tkn *Tokenizer) Lex(lval *yySymType) int {
 		typ, val = tkn.Scan()
 	}
 	lval.position = startPos
+	if typ == LEX_ERROR {
+		msg := tkn.lastLexError
+		if msg == "" {
+			msg = "invalid token"
+		}
+		tkn.lastLexError = ""
+		line, col := positionToLineColumn(tkn.Input, startPos)
+		tkn.LastError = &TokenizerError{
+			Err:      msg,
+			Position: startPos,
+			Line:     line,
+			Column:   col,
+			ErrToken: val,
+		}
+	}
 	switch typ {
 	case ID, STRING, NUMBER, VALUE_ARG, LIST_ARG, COMMENT:
 		lval.bytes = val
@@ -201,11 +245,19 @@ func (tkn *Tokenizer) Lex(lval *yySymType) int {
 	return typ
 }
 
-// Error is called by go yacc if there's a parsing error.
+// Error is called by go yacc when the parser hits a syntax error. If the lexer
+// already set LastError (e.g. for LEX_ERROR), we keep it so the more specific
+// message is preserved.
 func (tkn *Tokenizer) Error(err string) {
+	if tkn.LastError != nil {
+		return
+	}
+	line, col := positionToLineColumn(tkn.Input, tkn.Position)
 	tkn.LastError = &TokenizerError{
 		Err:      err,
 		Position: tkn.Position,
+		Line:     line,
+		Column:   col,
 		ErrToken: tkn.errorToken,
 	}
 }
@@ -307,14 +359,15 @@ func (tkn *Tokenizer) Scan() (int, []byte) {
 			if tkn.lastChar == '=' {
 				tkn.next()
 				return NE, nil
-			} else {
-				return LEX_ERROR, []byte("!")
 			}
+			tkn.lastLexError = "unexpected '!'"
+			return LEX_ERROR, []byte("!")
 		case '\'', '"':
 			return tkn.scanString(ch, STRING)
 		case '`':
 			return tkn.scanLiteralIdentifier()
 		default:
+			tkn.lastLexError = "invalid character"
 			return LEX_ERROR, []byte{byte(ch)}
 		}
 	}
@@ -345,12 +398,14 @@ func (tkn *Tokenizer) scanLiteralIdentifier() (int, []byte) {
 	buffer := bytes.NewBuffer(make([]byte, 0, 8))
 	buffer.WriteByte(byte(tkn.lastChar))
 	if !isLetter(tkn.lastChar) {
+		tkn.lastLexError = "backtick identifier must start with a letter"
 		return LEX_ERROR, buffer.Bytes()
 	}
 	for tkn.next(); isLetter(tkn.lastChar) || isDigit(tkn.lastChar); tkn.next() {
 		buffer.WriteByte(byte(tkn.lastChar))
 	}
 	if tkn.lastChar != '`' {
+		tkn.lastLexError = "unterminated backtick identifier"
 		return LEX_ERROR, buffer.Bytes()
 	}
 	tkn.next()
@@ -368,6 +423,7 @@ func (tkn *Tokenizer) scanBindVar() (int, []byte) {
 		tkn.next()
 	}
 	if !isLetter(tkn.lastChar) {
+		tkn.lastLexError = "invalid bind variable"
 		return LEX_ERROR, buffer.Bytes()
 	}
 	for isLetter(tkn.lastChar) || isDigit(tkn.lastChar) || tkn.lastChar == '.' {
@@ -412,6 +468,7 @@ func (tkn *Tokenizer) scanNumber(seenDecimalPoint bool) (int, []byte) {
 			}
 			// octal int
 			if seenDecimalDigit {
+				tkn.lastLexError = "invalid octal number"
 				return LEX_ERROR, buffer.Bytes()
 			}
 		}
@@ -453,6 +510,7 @@ func (tkn *Tokenizer) scanString(delim uint16, typ int) (int, []byte) {
 			}
 		} else if ch == '\\' {
 			if tkn.lastChar == EOFCHAR {
+				tkn.lastLexError = "unterminated string"
 				return LEX_ERROR, buffer.Bytes()
 			}
 			if decodedChar := sqltypes.SqlDecodeMap[byte(tkn.lastChar)]; decodedChar == sqltypes.DONTESCAPE {
@@ -463,6 +521,7 @@ func (tkn *Tokenizer) scanString(delim uint16, typ int) (int, []byte) {
 			tkn.next()
 		}
 		if ch == EOFCHAR {
+			tkn.lastLexError = "unterminated string"
 			return LEX_ERROR, buffer.Bytes()
 		}
 		buffer.WriteByte(byte(ch))
@@ -496,6 +555,7 @@ func (tkn *Tokenizer) scanCommentType2() (int, []byte) {
 			continue
 		}
 		if tkn.lastChar == EOFCHAR {
+			tkn.lastLexError = "unterminated block comment"
 			return LEX_ERROR, buffer.Bytes()
 		}
 		tkn.ConsumeNext(buffer)

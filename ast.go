@@ -190,6 +190,7 @@ func (*Delete) IStatement()  {}
 func (*Set) IStatement()     {}
 func (*DDL) IStatement()               {}
 func (*CreateTableAsSelect) IStatement() {}
+func (*CreateTable) IStatement()       {}
 func (*Other) IStatement()             {}
 func (Comments) IStatement() {}
 
@@ -389,6 +390,129 @@ func (node *CreateTableAsSelect) Format(buf *TrackedBuffer) {
 	} else {
 		buf.Myprintf("create table %s as %v", node.Table, node.Select)
 	}
+}
+
+// CreateTable represents CREATE [TEMPORARY|TEMP] TABLE ... (column definitions and table constraints).
+type CreateTable struct {
+	Table       []byte
+	Temporary   bool // true for CREATE TEMPORARY/TEMP TABLE
+	Columns     ColumnDefinitions
+	Constraints []*TableConstraint
+}
+
+// Temp returns node.Temporary for convenience; both Temporary and Temp() can be used.
+func (node *CreateTable) Temp() bool { return node.Temporary }
+
+func (node *CreateTable) Format(buf *TrackedBuffer) {
+	if node.Temporary {
+		buf.Myprintf("create temporary table %s (", node.Table)
+	} else {
+		buf.Myprintf("create table %s (", node.Table)
+	}
+	var sep string
+	for _, c := range node.Columns {
+		buf.Myprintf("%s%v", sep, c)
+		sep = ", "
+	}
+	for _, tc := range node.Constraints {
+		buf.Myprintf("%s%v", sep, tc)
+		sep = ", "
+	}
+	buf.WriteString(")")
+}
+
+// ColumnDefinitions is a list of column definitions.
+type ColumnDefinitions []*ColumnDefinition
+
+func (node ColumnDefinitions) Format(buf *TrackedBuffer) {
+	for i, c := range node {
+		if i > 0 {
+			buf.WriteString(", ")
+		}
+		buf.Myprintf("%v", c)
+	}
+}
+
+// ColumnDefinition represents a single column definition in CREATE TABLE.
+type ColumnDefinition struct {
+	Name    []byte
+	Type    ColumnType
+	Options ColumnOptions
+}
+
+func (node *ColumnDefinition) Format(buf *TrackedBuffer) {
+	buf.Myprintf("%s %v%v", node.Name, node.Type, node.Options)
+}
+
+// ColumnType represents a column type: "integer", "varchar(255)", or "decimal(10,2)".
+type ColumnType struct {
+	Name   []byte
+	Length *int // optional length (e.g. varchar(255)) or precision (e.g. decimal(10,2))
+	Scale  *int // optional scale (e.g. decimal(10,2)); only used with Length
+}
+
+func (node ColumnType) Format(buf *TrackedBuffer) {
+	buf.Myprintf("%s", node.Name)
+	if node.Length == nil {
+		return
+	}
+	buf.WriteString("(")
+	buf.WriteString(strconv.Itoa(*node.Length))
+	if node.Scale != nil {
+		buf.WriteString(", ")
+		buf.WriteString(strconv.Itoa(*node.Scale))
+	}
+	buf.WriteString(")")
+}
+
+// ColumnOptions represents column constraints we currently model.
+type ColumnOptions struct {
+	NotNull    bool
+	PrimaryKey bool
+}
+
+func (node ColumnOptions) Format(buf *TrackedBuffer) {
+	if node.PrimaryKey {
+		buf.WriteString(" primary key")
+	}
+	if node.NotNull {
+		buf.WriteString(" not null")
+	}
+}
+
+// TableConstraint represents a table-level constraint: PRIMARY KEY, UNIQUE, or FOREIGN KEY.
+type TableConstraint struct {
+	Kind       string   // "primary key", "unique", or "foreign key"
+	Columns   [][]byte  // column names
+	RefTable  []byte    // for FOREIGN KEY: referenced table
+	RefColumns [][]byte // for FOREIGN KEY: referenced column names
+}
+
+func (node *TableConstraint) Format(buf *TrackedBuffer) {
+	buf.Myprintf("%s (", node.Kind)
+	for i, col := range node.Columns {
+		if i > 0 {
+			buf.WriteString(", ")
+		}
+		buf.Myprintf("%s", col)
+	}
+	buf.WriteString(")")
+	if len(node.RefTable) > 0 {
+		buf.Myprintf(" references %s (", node.RefTable)
+		for i, col := range node.RefColumns {
+			if i > 0 {
+				buf.WriteString(", ")
+			}
+			buf.Myprintf("%s", col)
+		}
+		buf.WriteString(")")
+	}
+}
+
+// createTableBody is used by the parser to collect columns and table constraints in one list.
+type createTableBody struct {
+	Columns     ColumnDefinitions
+	Constraints []*TableConstraint
 }
 
 // DDL represents a CREATE, ALTER, DROP or RENAME statement.
